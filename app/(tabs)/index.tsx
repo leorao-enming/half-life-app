@@ -24,6 +24,7 @@ import {
   Text,
   View,
 } from 'react-native';
+import Svg, { Circle } from 'react-native-svg';
 import * as Haptics from 'expo-haptics';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { router } from 'expo-router';
@@ -41,7 +42,6 @@ import {
 } from '../../src/store/useBioStore';
 import { HALF_LIVES } from '../../src/utils/kinetics';
 import { initHealthKit } from '../../lib/health';
-import { supabase } from '../../lib/supabase';
 
 // ─── Env var check (logged once at module load) ───────────────────────────────
 console.log(
@@ -112,9 +112,7 @@ function resolveStatus(mg: number): StatusConfig {
   return               { text: 'STANDBY',     color: C.NEON_G  };
 }
 
-// ─── ReactorRing — safe View-based ring (no react-native-svg) ────────────────
-// SVG version commented out; replaced with concentric View circles.
-// Restore SVG version after confirming this screen is stable.
+// ─── ReactorRing — SVG arc progress ring ─────────────────────────────────────
 
 interface ReactorRingProps {
   progress: number;
@@ -122,65 +120,61 @@ interface ReactorRingProps {
 }
 
 function ReactorRing({ progress, color }: ReactorRingProps) {
-  const clamped = Math.max(0, Math.min(1, progress));
-  const pct     = Math.round(clamped * 100);
+  const clamped       = Math.max(0, Math.min(1, progress));
+  const pct           = Math.round(clamped * 100);
+  const cx            = RING_SIZE / 2;
+  const cy            = RING_SIZE / 2;
+  const R_TRACK       = (RING_SIZE - 20) / 2 - 2;
+  const R_OUTER       = (RING_SIZE - 10) / 2 - 1;
+  const R_INNER       = (RING_SIZE - 50) / 2;
+  const circumference = 2 * Math.PI * R_TRACK;
+  const dashOffset    = circumference * (1 - clamped);
 
   return (
-    <View style={{ width: RING_SIZE, height: RING_SIZE, alignItems: 'center', justifyContent: 'center' }}>
-      {/* Outer dim track ring */}
-      <View style={{
-        position:     'absolute',
-        width:        RING_SIZE - 10,
-        height:       RING_SIZE - 10,
-        borderRadius: (RING_SIZE - 10) / 2,
-        borderWidth:  1.5,
-        borderColor:  C.BORDER,
-      }} />
+    <Svg width={RING_SIZE} height={RING_SIZE}>
+      {/* Outer dim decorative ring */}
+      <Circle
+        cx={cx} cy={cy} r={R_OUTER}
+        fill="none"
+        stroke={C.BORDER}
+        strokeWidth={1.5}
+      />
       {/* Inner tick ring */}
-      <View style={{
-        position:     'absolute',
-        width:        RING_SIZE - 50,
-        height:       RING_SIZE - 50,
-        borderRadius: (RING_SIZE - 50) / 2,
-        borderWidth:  1,
-        borderColor:  `${color}28`,
-      }} />
-      {/* Glow aura */}
-      <View style={{
-        position:        'absolute',
-        width:           RING_SIZE - 20,
-        height:          RING_SIZE - 20,
-        borderRadius:    (RING_SIZE - 20) / 2,
-        borderWidth:     14,
-        borderColor:     color,
-        opacity:         0.10 + clamped * 0.08,
-      }} />
-      {/* Core progress ring — uses opacity to approximate fill level */}
-      <View style={{
-        position:        'absolute',
-        width:           RING_SIZE - 20,
-        height:          RING_SIZE - 20,
-        borderRadius:    (RING_SIZE - 20) / 2,
-        borderWidth:     2.5,
-        borderColor:     color,
-        opacity:         0.4 + clamped * 0.6,
-      }} />
-      {/* Progress percentage label inside ring */}
-      <View style={{
-        position:       'absolute',
-        bottom:         18,
-        alignSelf:      'center',
-      }}>
-        <Text style={{
-          fontFamily:    MONO,
-          fontSize:      9,
-          letterSpacing: 2,
-          color:         `${color}66`,
-        }}>
-          {pct}%
-        </Text>
-      </View>
-    </View>
+      <Circle
+        cx={cx} cy={cy} r={R_INNER}
+        fill="none"
+        stroke={color}
+        strokeWidth={1}
+        opacity={0.16}
+      />
+      {/* Track (background circle) */}
+      <Circle
+        cx={cx} cy={cy} r={R_TRACK}
+        fill="none"
+        stroke={C.BORDER}
+        strokeWidth={2.5}
+      />
+      {/* Glow halo */}
+      <Circle
+        cx={cx} cy={cy} r={R_TRACK}
+        fill="none"
+        stroke={color}
+        strokeWidth={14}
+        opacity={0.09 + clamped * 0.08}
+      />
+      {/* Progress arc */}
+      <Circle
+        cx={cx} cy={cy} r={R_TRACK}
+        fill="none"
+        stroke={color}
+        strokeWidth={3}
+        strokeLinecap="round"
+        strokeDasharray={`${circumference} ${circumference}`}
+        strokeDashoffset={dashOffset}
+        transform={`rotate(-90 ${cx} ${cy})`}
+        opacity={0.4 + clamped * 0.6}
+      />
+    </Svg>
   );
 }
 
@@ -289,24 +283,8 @@ export default function Dashboard() {
   const ringScaleAnim  = useRef(new Animated.Value(0.92)).current;
   const headerFadeAnim = useRef(new Animated.Value(0)).current;
 
-  // ── Supabase session check — safe one-shot, no router.replace ────────────
-  const [session, setSession] = useState<null | { user: { email?: string } }>(null);
-  const [sessionChecked, setSessionChecked] = useState(false);
-
-  useEffect(() => {
-    supabase.auth.getSession()
-      .then(({ data }) => {
-        const s = data?.session ?? null;
-        console.log('[auth] session:', s ? 'logged in' : 'guest');
-        setSession(s as typeof session);
-        setSessionChecked(true);
-      })
-      .catch((err) => {
-        console.warn('[auth] getSession error:', err instanceof Error ? err.message : String(err));
-        setSession(null);
-        setSessionChecked(true);
-      });
-  }, []);
+  // ── Auth — read from central store (set by _layout.tsx boot sequence) ───────
+  const supabaseUserId = useBioStore((s) => s.supabaseUserId);
 
   // ── HealthKit sync state ──────────────────────────────────────────────────
   const [hkStatus, setHkStatus] = useState<string>('');
@@ -380,7 +358,7 @@ export default function Dashboard() {
   // Guest-aware Injector navigation: Reactor is always accessible, but the
   // Injector prompts for login when cloud sync would silently fail.
   const onFabPress = useCallback(() => {
-    if (!session) {
+    if (!supabaseUserId) {
       Alert.alert(
         'LOGIN TO SYNC',
         'You\'re in guest mode. Injections are saved locally only and will not sync across devices.\n\nLog in to enable full cloud sync.',
@@ -396,7 +374,7 @@ export default function Dashboard() {
       return;
     }
     router.push('/inject');
-  }, [session]);
+  }, [supabaseUserId]);
 
   // ── Manual Sync Health button handler ────────────────────────────────────
   const onManualSyncHealth = useCallback(async () => {
@@ -452,17 +430,15 @@ export default function Dashboard() {
     process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY
   );
 
-  const authLabel = !sessionChecked
-    ? 'CHECKING AUTH...'
-    : !supabaseConfigured
-      ? '⚠  SUPABASE ENV VARS MISSING'
-      : session
-        ? `USER LOGGED IN${session.user.email ? '  ·  ' + session.user.email.toUpperCase() : ''}`
-        : 'GUEST MODE';
+  const authLabel = !supabaseConfigured
+    ? '⚠  SUPABASE ENV VARS MISSING'
+    : supabaseUserId
+      ? 'USER LOGGED IN'
+      : 'GUEST MODE';
 
   const authColor = !supabaseConfigured
     ? C.NEON_Y
-    : session
+    : supabaseUserId
       ? C.NEON_G
       : C.MID;
 

@@ -13,6 +13,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { OptimalWindows } from '../../components/OptimalWindows';
 import { PredictiveChart } from '../../components/PredictiveChart';
 import { SystemLog } from '../../components/SystemLog';
+import { useBioStore, selectAllLogs } from '../../src/store/useBioStore';
 
 // ── Render + fetch guard ──────────────────────────────────────────────────────
 //
@@ -61,17 +62,26 @@ const WEB_BD: object = IS_WEB
   ? { backdropFilter: 'blur(16px)', WebkitBackdropFilter: 'blur(16px)' }
   : {};
 
-// ── Static data ───────────────────────────────────────────────────────────────
+// ── Weekly load helper ────────────────────────────────────────────────────────
 
-const WEEKLY_DATA = [
-  { day: 'MON', load: 280 },
-  { day: 'TUE', load: 320 },
-  { day: 'WED', load: 240 },
-  { day: 'THU', load: 380 },
-  { day: 'FRI', load: 340 },
-  { day: 'SAT', load: 180 },
-  { day: 'SUN', load: 160 },
-];
+type DayLoad = { day: string; load: number };
+
+function buildWeeklyLoad(logs: ReturnType<typeof selectAllLogs>): DayLoad[] {
+  const DAY_NAMES = ['SUN', 'MON', 'TUE', 'WED', 'THU', 'FRI', 'SAT'];
+  const now = Date.now();
+
+  return Array.from({ length: 7 }, (_, i) => {
+    const msAgo    = (6 - i) * 86_400_000;
+    const dayStart = now - msAgo - ((now - msAgo) % 86_400_000);
+    const dayEnd   = dayStart + 86_400_000;
+
+    const load = logs
+      .filter((l) => l.substanceType === 'caffeine' && l.timestamp >= dayStart && l.timestamp < dayEnd)
+      .reduce((sum, l) => sum + l.amountMg, 0);
+
+    return { day: DAY_NAMES[new Date(dayStart).getDay()], load };
+  });
+}
 
 const CORR_DATA = [
   { time: '00', sleep: 8,   caf: 0   },
@@ -123,13 +133,13 @@ function GlassCard({ children }: { children: React.ReactNode }) {
 
 // ── Weekly Caffeine Bar Chart ─────────────────────────────────────────────────
 
-function WeeklyBarChart({ chartWidth }: { chartWidth: number }) {
+function WeeklyBarChart({ chartWidth, data }: { chartWidth: number; data: DayLoad[] }) {
   const CHART_H = 168;
   const PAD     = { top: 8, right: 8, bottom: 28, left: 30 };
   const plotW   = chartWidth - PAD.left - PAD.right;
   const plotH   = CHART_H - PAD.top - PAD.bottom;
-  const maxLoad = Math.max(...WEEKLY_DATA.map((d) => d.load));
-  const barStep = plotW / WEEKLY_DATA.length;
+  const maxLoad = Math.max(...data.map((d) => d.load), 1);
+  const barStep = plotW / data.length;
   const barW    = barStep * 0.52;
 
   const gridFracs = [0.25, 0.5, 0.75, 1];
@@ -176,7 +186,7 @@ function WeeklyBarChart({ chartWidth }: { chartWidth: number }) {
       />
 
       {/* Bars */}
-      {WEEKLY_DATA.map((d, i) => {
+      {data.map((d, i) => {
         const barH = (d.load / maxLoad) * plotH;
         const x    = PAD.left + i * barStep + (barStep - barW) / 2;
         const y    = PAD.top + plotH - barH;
@@ -328,6 +338,10 @@ export default function AnalyticsScreen() {
   // Inner chart width: screen − horizontal padding (20×2) − card inner padding (16×2)
   const chartWidth = W - 20 * 2 - 16 * 2;
 
+  // Live store data — selector is stable, no Date.now() risk, not useState
+  const logs       = useBioStore(selectAllLogs);
+  const weeklyData = React.useMemo(() => buildWeeklyLoad(logs), [logs]);
+
   const screenAnim = useRef(new Animated.Value(0)).current;
 
   // Empty dep array → runs exactly once on mount.
@@ -386,7 +400,7 @@ export default function AnalyticsScreen() {
         <Text style={[s.sectionLabel, s.sectionGap]}>▸  WEEKLY CAFFEINE LOAD</Text>
         <GlassCard>
           <Text style={s.cardSubtitle}>TOTAL MG INTAKE PER DAY</Text>
-          <WeeklyBarChart chartWidth={chartWidth} />
+          <WeeklyBarChart chartWidth={chartWidth} data={weeklyData} />
         </GlassCard>
 
         {/* ── Sleep vs Stimulants chart ──────────────────────────────── */}
