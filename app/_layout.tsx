@@ -75,7 +75,7 @@ export default function RootLayout() {
       try {
         if (Platform.OS === 'android') {
           await Notifications.setNotificationChannelAsync('biohazard', {
-            name:             'BioHazard Alerts',
+            name:             'Half-Life Alerts',
             importance:       Notifications.AndroidImportance.HIGH,
             vibrationPattern: [0, 250, 100, 250],
             lightColor:       '#FF073A',

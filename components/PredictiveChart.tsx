@@ -225,7 +225,7 @@ export function PredictiveChart() {
             />
           ) : (
             <View style={s.empty}>
-              <Text style={s.emptyText}>NO DATA  ·  INJECT TO POPULATE FORECAST</Text>
+              <Text style={s.emptyText}>NO DATA  ·  LOG TO POPULATE FORECAST</Text>
             </View>
           )}
         </View>

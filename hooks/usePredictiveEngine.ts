@@ -52,7 +52,7 @@ const LAST_CAF_NOTIF_KEY = 'hl_last_caf_notif';
 export async function setupNotificationChannel(): Promise<void> {
   if (Platform.OS === 'android') {
     await Notifications.setNotificationChannelAsync('biohazard', {
-      name: 'BioHazard Alerts',
+      name: 'Half-Life Alerts',
       importance: Notifications.AndroidImportance.HIGH,
       vibrationPattern: [0, 250, 100, 250],
       lightColor: '#FF073A',

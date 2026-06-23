@@ -19,25 +19,28 @@ import * as Device from 'expo-device';
 import { useBioStore } from '../../src/store/useBioStore';
 import { testHealthKitMinimal } from '../../lib/health';
 import { supabase } from '../../lib/supabase';
+import { color, font, alpha } from '../../src/theme/tokens';
 
-// ─── Design tokens ──────────────────────────────────────────────────────────────
+// ─── Design tokens (mapped onto the unified theme) ───────────────────────────────
+// Local keys are kept so the (many) style references below stay intact; the
+// values now flow from src/theme/tokens.ts — no per-file palette drift.
 
 const C = {
-  BG:      '#050505',
-  SURFACE: '#0C0C0C',
-  BORDER:  '#1A1A1A',
-  GLASS:   'rgba(255,255,255,0.035)',
-  BLUE:    '#00B4FF',
-  GREEN:   '#00FF87',
-  YELLOW:  '#FFD600',
-  PINK:    '#FF2D78',
-  TEXT:    '#FFFFFF',
-  DIM:     '#2E2E2E',
-  MID:     '#555555',
+  BG:      color.bg,
+  SURFACE: color.surface,
+  BORDER:  color.border,
+  GLASS:   alpha(color.text, 0.035),
+  BLUE:    color.primary,
+  GREEN:   color.ready,
+  YELLOW:  color.energy,
+  PINK:    color.alert,
+  TEXT:    color.text,
+  DIM:     color.textDim,
+  MID:     color.textMid,
   SUB:     '#3A3A3A',
 } as const;
 
-const MONO = Platform.select({ ios: 'Menlo', android: 'monospace', default: 'monospace' });
+const MONO = font.mono;
 
 // ─── Env var check ────────────────────────────────────────────────────────────────
 
@@ -550,7 +553,7 @@ function LabDashboard({ userEmail, onSignOut }: LabDashboardProps) {
         <GlassCard accentColor={C.BLUE}>
           <Text style={s.cardIntro}>
             ADJUST YOUR SUBSTANCE CLEARANCE SPEED.{'\n'}
-            AFFECTS COUNTDOWN TIMER ACCURACY.
+            AFFECTS SLEEP-READY ESTIMATES.
           </Text>
           <View style={s.metabDivider} />
           <MetabolismSelector substance="caffeine" label="CAFFEINE" color={C.BLUE}   />
@@ -565,7 +568,7 @@ function LabDashboard({ userEmail, onSignOut }: LabDashboardProps) {
         <GlassCard accentColor={C.PINK}>
           <Text style={s.cardIntro}>
             FLAG ACTIVE INTOLERANCES. TRIGGERS{'\n'}
-            WARNING OVERLAYS IN INJECT PANEL.
+            WARNING OVERLAYS IN THE LOG PANEL.
           </Text>
           <View style={s.metabDivider} />
           {ALLERGENS.map((allergen, i) => (

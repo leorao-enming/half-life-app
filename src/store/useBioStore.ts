@@ -213,7 +213,7 @@ export const useBioStore = create<BioStore>()(
         );
 
         if (!check.safe) {
-          Alert.alert('⚠ BIOHAZARD ALERT', check.message ?? 'Dose rejected.');
+          Alert.alert('⚠ SAFETY LIMIT', check.message ?? 'Dose rejected.');
           return;
         }
 

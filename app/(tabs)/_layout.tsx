@@ -3,8 +3,9 @@ import { BlurView } from 'expo-blur';
 import * as Haptics from 'expo-haptics';
 import { Platform, StyleSheet, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import { color, font, alpha } from '../../src/theme/tokens';
 
-const MONO = Platform.select({ ios: 'Menlo', android: 'monospace', default: 'monospace' });
+const MONO = font.mono;
 
 // iOS gets richer system material blur; Android uses dark tint
 const BLUR_TINT = Platform.select({
@@ -56,7 +57,7 @@ export default function TabsLayout() {
             style={[StyleSheet.absoluteFill, styles.tabBarBlur]}
           />
         ),
-        tabBarInactiveTintColor: '#2E2E2E',
+        tabBarInactiveTintColor: color.textDim,
         tabBarLabelStyle: {
           fontFamily:    MONO,
           fontSize:      8,
@@ -69,20 +70,20 @@ export default function TabsLayout() {
       <Tabs.Screen
         name="index"
         options={{
-          title: 'REACTOR',
-          tabBarActiveTintColor: '#FFFF33',
-          tabBarIcon: ({ color, focused }) => (
-            <TabIcon name="pulse-outline" color={color} focused={focused} />
+          title: 'NOW',
+          tabBarActiveTintColor: color.primary,
+          tabBarIcon: ({ color: c, focused }) => (
+            <TabIcon name="pulse-outline" color={c} focused={focused} />
           ),
         }}
       />
       <Tabs.Screen
         name="analytics"
         options={{
-          title: 'ANALYTICS',
-          tabBarActiveTintColor: '#0FF0FC',
-          tabBarIcon: ({ color, focused }) => (
-            <TabIcon name="bar-chart-outline" color={color} focused={focused} />
+          title: 'TRENDS',
+          tabBarActiveTintColor: color.energy,
+          tabBarIcon: ({ color: c, focused }) => (
+            <TabIcon name="bar-chart-outline" color={c} focused={focused} />
           ),
         }}
       />
@@ -90,9 +91,9 @@ export default function TabsLayout() {
         name="lab"
         options={{
           title: 'LAB',
-          tabBarActiveTintColor: '#00FF87',
-          tabBarIcon: ({ color, focused }) => (
-            <TabIcon name="flask-outline" color={color} focused={focused} />
+          tabBarActiveTintColor: color.ready,
+          tabBarIcon: ({ color: c, focused }) => (
+            <TabIcon name="flask-outline" color={c} focused={focused} />
           ),
         }}
       />
