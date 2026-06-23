@@ -15,12 +15,13 @@ import {
   selectHealthKitMultiplier,
 } from '../src/store/useBioStore';
 import { generateForecast } from '../src/utils/kinetics';
+import { color } from '../src/theme/tokens';
 
 const C = {
-  NEON_Y:  '#FFFF33',
-  BLOOD_R: '#FF073A',
-  MID:     '#555555',
-  DIM:     '#2A2A2A',
+  NEON_Y:  color.primary, // caffeine — hero accent
+  BLOOD_R: color.energy,  // sugar — energy accent
+  MID:     color.textMid,
+  DIM:     color.textDim,
 } as const;
 
 const MONO   = Platform.select({ ios: 'Menlo', android: 'monospace', default: 'monospace' });
