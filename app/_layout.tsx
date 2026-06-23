@@ -1,55 +1,130 @@
 // =============================================================================
-// app/_layout.tsx
-// Root Layout — Step 1 Recovery
-//
-// Navigation restored. useEffect hooks remain commented out.
-// Restore one block at a time after each screen is confirmed stable.
+// app/_layout.tsx  —  Root Layout
+// Boot sequence:
+//   1. Rehydrate Zustand store from AsyncStorage
+//   2. Supabase auth listener → setSupabaseUser → triggers cloud sync
+//   3. HealthKit auto-init on iOS → setHealthKitMultiplier
+//   4. Notification permissions (deferred 2 s to avoid startup jank)
+//   5. Offline-queue flush: periodic (30 s) + AppState foreground
 // =============================================================================
 
+import { useEffect, useRef } from 'react';
+import { AppState, AppStateStatus, Platform } from 'react-native';
 import { Stack } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
+import * as SplashScreen from 'expo-splash-screen';
+import * as Notifications from 'expo-notifications';
+import * as Network from 'expo-network';
 import Constants from 'expo-constants';
+import { supabase } from '../lib/supabase';
+import { initHealthKit } from '../lib/health';
+import { useBioStore } from '../src/store/useBioStore';
 
-// Printed once at module load so we can verify the Dev Client bundle URL.
-// If hostUri is undefined the device cannot reach Metro — check your network.
-console.log('[layout] expoConfig.hostUri :', Constants.expoConfig?.hostUri ?? '⚠ undefined — device may be unreachable');
-console.log('[layout] expoConfig.scheme  :', Constants.expoConfig?.scheme   ?? '⚠ undefined');
-console.log('[layout] expoConfig.slug    :', Constants.expoConfig?.slug     ?? '⚠ undefined');
+SplashScreen.preventAutoHideAsync().catch(() => {});
 
-// import { useEffect, useRef, useState } from 'react';
-// import * as Notifications from 'expo-notifications';
-// import * as Network from 'expo-network';
-// import * as SplashScreen from 'expo-splash-screen';
-// import { Alert, AppState, AppStateStatus } from 'react-native';
-// import { useBioStore } from '../src/store/useBioStore';
-// import { setupNotificationChannel, usePredictiveEngine } from '../hooks/usePredictiveEngine';
+Notifications.setNotificationHandler({
+  handleNotification: async () => ({
+    shouldShowAlert:  true,
+    shouldPlaySound:  true,
+    shouldSetBadge:   false,
+    shouldShowBanner: true,
+    shouldShowList:   true,
+  }),
+});
 
-// SplashScreen.preventAutoHideAsync().catch(() => {});
-
-// Notifications.setNotificationHandler({
-//   handleNotification: async () => ({
-//     shouldShowAlert: true,
-//     shouldPlaySound: true,
-//     shouldSetBadge: false,
-//     shouldShowBanner: true,
-//     shouldShowList: true,
-//   }),
-// });
-
-// function DeferredEngine({ multiplier }: { multiplier: number }) {
-//   usePredictiveEngine(multiplier);
-//   return null;
-// }
+console.log('[layout] hostUri:', Constants.expoConfig?.hostUri ?? '⚠ undefined');
+console.log('[layout] scheme :', Constants.expoConfig?.scheme  ?? '⚠ undefined');
 
 export default function RootLayout() {
+  const hasInitRef  = useRef(false);
+  const appStateRef = useRef<AppStateStatus>(AppState.currentState);
+
+  useEffect(() => {
+    if (hasInitRef.current) return;
+    hasInitRef.current = true;
+
+    // ── 1. Store rehydration ───────────────────────────────────────────────
+    void useBioStore.persist.rehydrate();
+
+    // ── 2. Auth listener — central source of truth for all screens ─────────
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+      useBioStore.getState().setSupabaseUser(session?.user.id ?? null);
+    });
+
+    // Initial session check (covers cold start where onAuthStateChange may fire late)
+    supabase.auth.getSession()
+      .then(({ data }) => {
+        const uid = data?.session?.user.id ?? null;
+        if (uid) useBioStore.getState().setSupabaseUser(uid);
+      })
+      .catch(() => {});
+
+    // ── 3. HealthKit auto-init (iOS only, non-blocking) ────────────────────
+    if (Platform.OS === 'ios') {
+      initHealthKit()
+        .then(({ multiplier }) => {
+          useBioStore.getState().setHealthKitMultiplier(multiplier);
+          console.log('[layout] HealthKit multiplier:', multiplier.toFixed(3));
+        })
+        .catch(() => {});
+    }
+
+    // ── 4. Notification permissions (deferred to avoid startup jank) ───────
+    const notifTimer = setTimeout(async () => {
+      try {
+        if (Platform.OS === 'android') {
+          await Notifications.setNotificationChannelAsync('biohazard', {
+            name:             'BioHazard Alerts',
+            importance:       Notifications.AndroidImportance.HIGH,
+            vibrationPattern: [0, 250, 100, 250],
+            lightColor:       '#FF073A',
+            sound:            'default',
+          });
+        }
+        const { status } = await Notifications.getPermissionsAsync();
+        if (status !== 'granted') await Notifications.requestPermissionsAsync();
+      } catch {}
+    }, 2_000);
+
+    // ── 5. Offline queue flush ─────────────────────────────────────────────
+    const flushInterval = setInterval(async () => {
+      try {
+        if (useBioStore.getState().offlineQueue.length === 0) return;
+        const net = await Network.getNetworkStateAsync();
+        if (net.isConnected && net.isInternetReachable) {
+          await useBioStore.getState().flushOfflineQueue();
+        }
+      } catch {}
+    }, 30_000);
+
+    const appStateSub = AppState.addEventListener('change', (next) => {
+      if (appStateRef.current.match(/inactive|background/) && next === 'active') {
+        if (useBioStore.getState().offlineQueue.length > 0) {
+          void useBioStore.getState().flushOfflineQueue();
+        }
+      }
+      appStateRef.current = next;
+    });
+
+    // ── Splash hide ────────────────────────────────────────────────────────
+    SplashScreen.hideAsync().catch(() => {});
+
+    return () => {
+      subscription.unsubscribe();
+      clearTimeout(notifTimer);
+      clearInterval(flushInterval);
+      appStateSub.remove();
+    };
+  }, []);
+
   return (
     <SafeAreaProvider>
       <StatusBar style="light" backgroundColor="#000000" />
       <Stack
         screenOptions={{
-          headerShown: false,
-          animation: 'fade',
+          headerShown:  false,
+          animation:    'fade',
           contentStyle: { backgroundColor: '#000000' },
         }}
       >
@@ -58,87 +133,3 @@ export default function RootLayout() {
     </SafeAreaProvider>
   );
 }
-
-// ─── Commented-out inner layout (restore phase by phase) ──────────────────────
-
-// function RootLayoutInner({ onFatalError }: { onFatalError: (msg: string) => void }) {
-//   const rehydrate        = useBioStore.persist.rehydrate;
-//   const flushQueue       = useBioStore((s) => s.flushOfflineQueue);
-//   const healthMultiplier = useBioStore((s) => s.profile.healthKitMultiplier);
-//   const [uiReady, setUiReady]         = useState(false);
-//   const [engineReady, setEngineReady] = useState(false);
-//   const appStateRef    = useRef<AppStateStatus>(AppState.currentState);
-//   const hasInitialized = useRef(false);
-
-//   useEffect(() => {
-//     SplashScreen.hideAsync().catch(() => {});
-//     const t = setTimeout(() => setUiReady(true), 50);
-//     return () => clearTimeout(t);
-//   }, []);
-
-//   useEffect(() => {
-//     const t = setTimeout(() => setEngineReady(true), 3000);
-//     return () => clearTimeout(t);
-//   }, []);
-
-//   useEffect(() => {
-//     if (hasInitialized.current) return;
-//     hasInitialized.current = true;
-//     rehydrate().catch((e) => {
-//       const msg = e instanceof Error ? e.message : String(e);
-//       onFatalError(msg);
-//     });
-//   }, [rehydrate, onFatalError]);
-
-//   useEffect(() => {
-//     const timer = setTimeout(async () => {
-//       try {
-//         await setupNotificationChannel();
-//         const { status } = await Notifications.getPermissionsAsync();
-//         if (status !== 'granted') await Notifications.requestPermissionsAsync();
-//       } catch {}
-//     }, 1500);
-//     return () => clearTimeout(timer);
-//   }, []);
-
-//   useEffect(() => {
-//     const id = setInterval(async () => {
-//       try {
-//         if (useBioStore.getState().offlineQueue.length === 0) return;
-//         const net = await Network.getNetworkStateAsync();
-//         if (net.isConnected && net.isInternetReachable) void flushQueue();
-//       } catch {}
-//     }, 30_000);
-//     return () => clearInterval(id);
-//   }, [flushQueue]);
-
-//   useEffect(() => {
-//     const sub = AppState.addEventListener('change', (next) => {
-//       if (appStateRef.current.match(/inactive|background/) && next === 'active') {
-//         if (useBioStore.getState().offlineQueue.length > 0) void flushQueue();
-//       }
-//       appStateRef.current = next;
-//     });
-//     return () => sub.remove();
-//   }, [flushQueue]);
-
-//   if (!uiReady) {
-//     return (
-//       <View style={boot.container}>
-//         <Text style={boot.label}>SYSTEM LOADING...</Text>
-//       </View>
-//     );
-//   }
-
-//   return (
-//     <SafeAreaProvider>
-//       <StatusBar style="light" backgroundColor="#000000" />
-//       {engineReady && <DeferredEngine multiplier={healthMultiplier} />}
-//       <Stack screenOptions={{ headerShown: false, animation: 'fade', contentStyle: { backgroundColor: '#000000' } }}>
-//         <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
-//       </Stack>
-//     </SafeAreaProvider>
-//   );
-// }
-
-// ─── Styles (boot styles live in the commented-out RootLayoutInner block above) ──
