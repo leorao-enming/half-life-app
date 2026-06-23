@@ -1,631 +1,349 @@
 // =============================================================================
-// app/(tabs)/index.tsx
-// REACTOR — Main Dashboard  (Step 1 Restoration)
-//
-// Safety changes vs. full version:
-//   ✅ react-native-svg         → removed (replaced with View-based ring)
-//   ✅ expo-linear-gradient     → removed (plain dark View background)
-//   ✅ expo-blur / BlurView     → removed (plain semi-transparent View)
-//   ✅ All useEffect hooks      → commented out (re-enable one at a time)
-//   ✅ Animated.Value init      → set to 1 so UI is visible without effects
-//   ✅ HealthKit init           → moved to "Manual Sync Health" button onPress
-//   ✅ Supabase session         → checked once via useEffect, no router.replace
+// app/(tabs)/index.tsx — NOW
+// The home screen. Answers in one glance: what's my state right now, when can
+// I sleep, and gives a zero-friction way to log. Energy/performance framing.
 // =============================================================================
 
-import React, { useEffect, useMemo, useRef, useState, useCallback } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
-  Alert,
   Animated,
-  DimensionValue,
   Platform,
   Pressable,
   ScrollView,
   StyleSheet,
   Text,
   View,
+  useWindowDimensions,
 } from 'react-native';
-import Svg, { Circle } from 'react-native-svg';
 import * as Haptics from 'expo-haptics';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { router } from 'expo-router';
+import Svg, { Defs, LinearGradient as SvgGradient, Stop, Path, Line } from 'react-native-svg';
 
 import {
   selectAllLogs,
   selectCafFactor,
-  selectSugarFactor,
   selectSodiumFactor,
   selectHealthKitMultiplier,
   selectOfflineQueueCount,
   computeActiveCaffeine,
-  computeActiveBySubstance,
   useBioStore,
 } from '../../src/store/useBioStore';
-import { HALF_LIVES } from '../../src/utils/kinetics';
-import { initHealthKit } from '../../lib/health';
+import { generateForecast } from '../../src/utils/kinetics';
+import {
+  classifyEnergyState,
+  effectiveCaffeineHalfLife,
+  clearanceSecs,
+  sleepReadyAt,
+  fmtClock,
+} from '../../src/utils/energyState';
+import { color, font, type as T, space, tracking, alpha } from '../../src/theme/tokens';
 
-// ─── Env var check (logged once at module load) ───────────────────────────────
+// ─── Constants ────────────────────────────────────────────────────────────────
+
+const QUICK_DOSE_MG   = 95;     // a standard cup of drip coffee
+const SODIUM_LIMIT_MG = 2_300;  // FDA daily ceiling
+
+// ─── Env check (logged once) ──────────────────────────────────────────────────
 console.log(
-  '[reactor] EXPO_PUBLIC_SUPABASE_URL:',
+  '[now] EXPO_PUBLIC_SUPABASE_URL:',
   process.env.EXPO_PUBLIC_SUPABASE_URL ?? '⚠ MISSING — add to .env and restart dev server',
 );
 
-// ─── Design tokens ────────────────────────────────────────────────────────────
-
-const C = {
-  BG:      '#000000',
-  BORDER:  '#1A1A1A',
-  NEON_G:  '#39FF14',
-  NEON_Y:  '#FFFF33',
-  ELEC_B:  '#0FF0FC',
-  BLOOD_R: '#FF073A',
-  TEXT:    '#FFFFFF',
-  DIM:     '#2A2A2A',
-  MID:     '#555555',
-} as const;
-
-const MONO = Platform.select({
-  ios:     'Menlo',
-  android: 'monospace',
-  default: 'monospace',
-});
-
-// ─── Ring geometry (kept for layout math) ────────────────────────────────────
-
-const RING_SIZE   = 264;
-
-// ─── Domain constants ─────────────────────────────────────────────────────────
-
-const SODIUM_LIMIT_MG   = 2_300;
-const SUGAR_LIMIT_MG    = 50_000;
-const CAFFEINE_CLEAR_MG = 5;
-const DEMO_SECONDS      = 5 * 3_600;
-const DEMO_SODIUM_PCT   = 0.70;
-const DEMO_SUGAR_PCT    = 0.20;
-
-const WAVE_BARS: number[] = Array.from({ length: 32 }, (_, i) => {
-  const decay  = Math.pow(0.5, i / 8) * 36;
-  const ripple = Math.sin(i * 0.85) * 3;
-  return Math.max(3, decay + ripple);
-});
-const WAVE_ACTIVE_COUNT = Math.floor(WAVE_BARS.length * 0.65);
-
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
-function fmtTime(totalSec: number): string {
-  if (totalSec <= 0) return '00:00:00';
-  const h   = Math.floor(totalSec / 3_600);
-  const m   = Math.floor((totalSec % 3_600) / 60);
-  const sec = totalSec % 60;
-  return [h, m, sec].map((n) => String(n).padStart(2, '0')).join(':');
+function fmtDuration(secs: number): string {
+  const h = Math.floor(secs / 3_600);
+  const m = Math.floor((secs % 3_600) / 60);
+  return h > 0 ? `${h}H ${m}M` : `${m}M`;
 }
 
-function clearanceSecs(mg: number, halfLifeH: number): number {
-  if (mg <= CAFFEINE_CLEAR_MG) return 0;
-  return Math.round(halfLifeH * Math.log2(mg / CAFFEINE_CLEAR_MG) * 3_600);
+function smoothLine(pts: [number, number][]): string {
+  if (!pts.length) return '';
+  let d = `M ${pts[0][0].toFixed(1)} ${pts[0][1].toFixed(1)}`;
+  for (let i = 1; i < pts.length; i++) {
+    const cpx = ((pts[i - 1][0] + pts[i][0]) / 2).toFixed(1);
+    d += ` C ${cpx} ${pts[i - 1][1].toFixed(1)}, ${cpx} ${pts[i][1].toFixed(1)}, ${pts[i][0].toFixed(1)} ${pts[i][1].toFixed(1)}`;
+  }
+  return d;
 }
 
-interface StatusConfig { text: string; color: string }
-function resolveStatus(mg: number): StatusConfig {
-  if (mg > 200) return { text: 'OVERCHARGED', color: C.NEON_Y  };
-  if (mg > 100) return { text: 'OPTIMAL',     color: C.ELEC_B  };
-  if (mg > 20)  return { text: 'DECLINING',   color: C.BLOOD_R };
-  return               { text: 'STANDBY',     color: C.NEON_G  };
+function smoothArea(pts: [number, number][], baseY: number): string {
+  if (!pts.length) return '';
+  const last = pts[pts.length - 1];
+  const first = pts[0];
+  return `${smoothLine(pts)} L ${last[0].toFixed(1)} ${baseY} L ${first[0].toFixed(1)} ${baseY} Z`;
 }
 
-// ─── ReactorRing — SVG arc progress ring ─────────────────────────────────────
+// ─── Caffeine decay curve (mini) ──────────────────────────────────────────────
 
-interface ReactorRingProps {
-  progress: number;
-  color: string;
-}
+function DecayCurve({ width, series, stroke }: { width: number; series: number[]; stroke: string }) {
+  const H    = 72;
+  const padX = 2;
+  const padY = 6;
+  const plotW = width - padX * 2;
+  const plotH = H - padY * 2;
+  const max   = Math.max(...series, 1);
+  const step  = plotW / Math.max(series.length - 1, 1);
 
-function ReactorRing({ progress, color }: ReactorRingProps) {
-  const clamped       = Math.max(0, Math.min(1, progress));
-  const pct           = Math.round(clamped * 100);
-  const cx            = RING_SIZE / 2;
-  const cy            = RING_SIZE / 2;
-  const R_TRACK       = (RING_SIZE - 20) / 2 - 2;
-  const R_OUTER       = (RING_SIZE - 10) / 2 - 1;
-  const R_INNER       = (RING_SIZE - 50) / 2;
-  const circumference = 2 * Math.PI * R_TRACK;
-  const dashOffset    = circumference * (1 - clamped);
+  const pts: [number, number][] = series.map((v, i) => [
+    padX + i * step,
+    padY + plotH - (v / max) * plotH,
+  ]);
 
   return (
-    <Svg width={RING_SIZE} height={RING_SIZE}>
-      {/* Outer dim decorative ring */}
-      <Circle
-        cx={cx} cy={cy} r={R_OUTER}
-        fill="none"
-        stroke={C.BORDER}
-        strokeWidth={1.5}
-      />
-      {/* Inner tick ring */}
-      <Circle
-        cx={cx} cy={cy} r={R_INNER}
-        fill="none"
-        stroke={color}
-        strokeWidth={1}
-        opacity={0.16}
-      />
-      {/* Track (background circle) */}
-      <Circle
-        cx={cx} cy={cy} r={R_TRACK}
-        fill="none"
-        stroke={C.BORDER}
-        strokeWidth={2.5}
-      />
-      {/* Glow halo */}
-      <Circle
-        cx={cx} cy={cy} r={R_TRACK}
-        fill="none"
-        stroke={color}
-        strokeWidth={14}
-        opacity={0.09 + clamped * 0.08}
-      />
-      {/* Progress arc */}
-      <Circle
-        cx={cx} cy={cy} r={R_TRACK}
-        fill="none"
-        stroke={color}
-        strokeWidth={3}
-        strokeLinecap="round"
-        strokeDasharray={`${circumference} ${circumference}`}
-        strokeDashoffset={dashOffset}
-        transform={`rotate(-90 ${cx} ${cy})`}
-        opacity={0.4 + clamped * 0.6}
-      />
+    <Svg width={width} height={H}>
+      <Defs>
+        <SvgGradient id="nowCafGrad" x1="0" y1="0" x2="0" y2="1">
+          <Stop offset="0"   stopColor={stroke} stopOpacity={0.28} />
+          <Stop offset="0.7" stopColor={stroke} stopOpacity={0.05} />
+          <Stop offset="1"   stopColor={stroke} stopOpacity={0} />
+        </SvgGradient>
+      </Defs>
+      <Line x1={padX} y1={H - padY} x2={width - padX} y2={H - padY} stroke={alpha(color.text, 0.05)} strokeWidth={1} />
+      <Path d={smoothArea(pts, H - padY)} fill="url(#nowCafGrad)" />
+      <Path d={smoothLine(pts)} stroke={stroke} strokeWidth={2} fill="none" />
     </Svg>
   );
 }
 
-// ─── GlassCard — safe plain View (no BlurView) ───────────────────────────────
-// BlurView removed. Restore after stable.
-
-interface GlassCardProps {
-  children: React.ReactNode;
-  accentColor?: string;
-}
-
-function GlassCard({ children, accentColor = C.ELEC_B }: GlassCardProps) {
-  return (
-    <View style={[s.glassWrapper, { borderColor: `${accentColor}28` }]}>
-      <View style={s.glassContent}>{children}</View>
-    </View>
-  );
-}
-
-// ─── BarRow ───────────────────────────────────────────────────────────────────
-
-interface BarRowProps { label: string; pct: number; color: string; sub: string }
-
-function BarRow({ label, pct, color, sub }: BarRowProps) {
-  const clamped  = Math.max(0, Math.min(1, pct));
-  const widthStr = `${Math.round(clamped * 100)}%` as DimensionValue;
-
-  return (
-    <View>
-      <View style={s.barHeader}>
-        <Text style={s.barLabel}>{label}</Text>
-        <Text style={[s.barPct, { color }]}>{Math.round(clamped * 100)}%</Text>
-      </View>
-      <View style={s.barTrackOuter}>
-        <View style={s.barTrackBg} />
-        <View style={[s.barGlow, { width: widthStr, backgroundColor: color }]} />
-        <View style={[s.barFill, { width: widthStr, backgroundColor: color }]} />
-        {clamped > 0.02 && (
-          <View style={[s.barDot, { left: widthStr, backgroundColor: color }]} />
-        )}
-      </View>
-      <Text style={s.barSub}>{sub}</Text>
-    </View>
-  );
-}
-
-// ─── SyncIndicator ────────────────────────────────────────────────────────────
+// ─── Sync indicator ───────────────────────────────────────────────────────────
 
 function SyncIndicator() {
   const queueCount = useBioStore((s) => selectOfflineQueueCount(s));
   const syncStatus = useBioStore((s) => s.syncStatus);
-
   if (queueCount === 0 && syncStatus !== 'error') return null;
 
-  const color = syncStatus === 'error' ? C.BLOOD_R : C.NEON_Y;
-  const label = syncStatus === 'error'
-    ? 'SYNC ERROR'
-    : `${queueCount} PENDING`;
-
+  const c     = syncStatus === 'error' ? color.alert : color.energy;
+  const label = syncStatus === 'error' ? 'SYNC ERROR' : `${queueCount} PENDING`;
   return (
-    <View style={[s.syncBadge, { borderColor: `${color}44`, backgroundColor: `${color}10` }]}>
-      <Text style={[s.syncBadgeText, { color }]}>{label}</Text>
+    <View style={[s.syncBadge, { borderColor: alpha(c, 0.27), backgroundColor: alpha(c, 0.06) }]}>
+      <Text style={[s.syncBadgeText, { color: c }]}>{label}</Text>
     </View>
   );
 }
 
-// ─── Dashboard ────────────────────────────────────────────────────────────────
+// ─── Secondary tile ───────────────────────────────────────────────────────────
 
-export default function Dashboard() {
+function Tile({ label, value, sub, accent }: { label: string; value: string; sub: string; accent: string }) {
+  return (
+    <View style={[s.tile, { borderColor: alpha(accent, 0.18) }]}>
+      <Text style={s.tileLabel}>{label}</Text>
+      <Text style={[s.tileValue, { color: accent }]}>{value}</Text>
+      <Text style={s.tileSub}>{sub}</Text>
+    </View>
+  );
+}
+
+// ─── NOW screen ───────────────────────────────────────────────────────────────
+
+export default function Now() {
   const insets = useSafeAreaInsets();
+  const { width: screenW } = useWindowDimensions();
+  const curveWidth = screenW - space.xl * 2 - space.lg * 2;
 
-  // ── Raw store data — stable refs, no Date.now() inside selectors ─────────
-  // (Inline Date.now() selectors cause infinite re-render loops after inject)
+  // Raw store data — stable selectors, no Date.now() inside
   const logs          = useBioStore(selectAllLogs);
   const cafFactor     = useBioStore(selectCafFactor);
-  const sugarFactor   = useBioStore(selectSugarFactor);
   const sodiumFactor  = useBioStore(selectSodiumFactor);
   const healthKitMult = useBioStore(selectHealthKitMultiplier);
+  const supabaseUserId = useBioStore((st) => st.supabaseUserId);
 
-  // ── nowMs — ticks every second, drives all time-based computations ────────
+  // nowMs ticks every second; drives all time-based computations
   const [nowMs, setNowMs] = useState(() => Date.now());
   useEffect(() => {
     const id = setInterval(() => setNowMs(Date.now()), 1_000);
     return () => clearInterval(id);
   }, []);
 
-  // ── Active substance levels — computed via useMemo, loop-safe ─────────────
-  const activeCaffeineMg = useMemo(
+  const hasCaf  = useMemo(() => logs.some((l) => l.substanceType === 'caffeine'), [logs]);
+  const isEmpty = logs.length === 0;
+
+  const activeCaf = useMemo(
     () => computeActiveCaffeine(logs, cafFactor, healthKitMult, nowMs),
     [logs, cafFactor, healthKitMult, nowMs],
   );
-  const activeSodiumMg = useMemo(
-    () => computeActiveBySubstance(logs, 'sodium', sodiumFactor, nowMs),
-    [logs, sodiumFactor, nowMs],
+  const halfLife  = useMemo(() => effectiveCaffeineHalfLife(cafFactor, healthKitMult), [cafFactor, healthKitMult]);
+  const state     = classifyEnergyState(activeCaf);
+  const readyAtMs = useMemo(() => sleepReadyAt(activeCaf, halfLife, nowMs), [activeCaf, halfLife, nowMs]);
+  const secsLeft  = useMemo(() => clearanceSecs(activeCaf, halfLife), [activeCaf, halfLife]);
+
+  // Caffeine forecast curve (12h)
+  const cafSeries = useMemo(
+    () => generateForecast(logs, cafFactor, healthKitMult, nowMs).map((p) => p.caffeine),
+    [logs, cafFactor, healthKitMult, nowMs],
   );
-  const activeSugarMg = useMemo(
-    () => computeActiveBySubstance(logs, 'sugar', sugarFactor, nowMs),
-    [logs, sugarFactor, nowMs],
-  );
-  const hasCaf    = useMemo(() => logs.some((l) => l.substanceType === 'caffeine'), [logs]);
-  const hasSodium = useMemo(() => logs.some((l) => l.substanceType === 'sodium'),   [logs]);
-  const hasSugar  = useMemo(() => logs.some((l) => l.substanceType === 'sugar'),    [logs]);
 
-  // ── Animated refs — start at 0, entrance animation drives to 1 ───────────
-  const ringFadeAnim   = useRef(new Animated.Value(0)).current;
-  const ringScaleAnim  = useRef(new Animated.Value(0.92)).current;
-  const headerFadeAnim = useRef(new Animated.Value(0)).current;
+  // Energy window (sugar) — honest rough gauge, NOT exponential decay
+  const sugarWindow = useMemo(() => {
+    const sugar = logs.filter((l) => l.substanceType === 'sugar');
+    if (!sugar.length) return null;
+    const mins = (nowMs - Math.max(...sugar.map((l) => l.timestamp))) / 60_000;
+    if (mins > 120) return null;
+    if (mins < 45)  return { label: 'PEAK',   sub: `${Math.round(mins)}M IN` };
+    if (mins < 90)  return { label: 'FADING', sub: `${Math.round(mins)}M IN` };
+    return                 { label: 'LOW',    sub: `${Math.round(mins)}M IN` };
+  }, [logs, nowMs]);
 
-  // ── Auth — read from central store (set by _layout.tsx boot sequence) ───────
-  const supabaseUserId = useBioStore((s) => s.supabaseUserId);
+  // Sodium today — simple cumulative daily total, no half-life claim
+  const sodiumTodayMg = useMemo(() => {
+    const midnight = new Date(); midnight.setHours(0, 0, 0, 0);
+    const m0 = midnight.getTime();
+    return logs
+      .filter((l) => l.substanceType === 'sodium' && l.timestamp >= m0)
+      .reduce((sum, l) => sum + l.amountMg, 0);
+  }, [logs, nowMs]);
 
-  // ── HealthKit sync state ──────────────────────────────────────────────────
-  const [hkStatus, setHkStatus] = useState<string>('');
-  const [hkLoading, setHkLoading] = useState(false);
-
-  // ── Entrance animations ───────────────────────────────────────────────────
+  // Entrance animation
+  const fade  = useRef(new Animated.Value(0)).current;
+  const slide = useRef(new Animated.Value(12)).current;
   useEffect(() => {
     Animated.parallel([
-      Animated.timing(headerFadeAnim, { toValue: 1, duration: 400, useNativeDriver: true }),
-      Animated.sequence([
-        Animated.delay(120),
-        Animated.parallel([
-          Animated.timing(ringFadeAnim,  { toValue: 1, duration: 600, useNativeDriver: true }),
-          Animated.timing(ringScaleAnim, { toValue: 1, duration: 550, useNativeDriver: true }),
-        ]),
-      ]),
+      Animated.timing(fade,  { toValue: 1, duration: 500, useNativeDriver: true }),
+      Animated.timing(slide, { toValue: 0, duration: 500, useNativeDriver: true }),
     ]).start();
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [fade, slide]);
+
+  // BioState haptic on threshold crossings
+  const prevKeyRef = useRef(state.key);
+  useEffect(() => {
+    if (state.key !== prevKeyRef.current) {
+      if (state.key === 'PEAK')        void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
+      else if (state.key === 'CLEAR' && hasCaf) void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+      prevKeyRef.current = state.key;
+    }
+  }, [state.key, hasCaf]);
+
+  // Quick-log a standard coffee — zero-friction logging
+  const onQuickLog = useCallback(() => {
+    void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+    useBioStore.getState().addLog({
+      label:         'COFFEE',
+      substanceType: 'caffeine',
+      amountMg:      QUICK_DOSE_MG,
+      timestamp:     Date.now(),
+    });
   }, []);
 
-  // ── BioHazard status haptics ──────────────────────────────────────────────
-  const prevStatusRef = useRef<string>('STANDBY');
-  useEffect(() => {
-    const current = resolveStatus(activeCaffeineMg).text;
-    if (current !== prevStatusRef.current) {
-      if (current === 'OVERCHARGED') {
-        void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
-      } else if (activeCaffeineMg < CAFFEINE_CLEAR_MG && hasCaf) {
-        void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-      }
-      prevStatusRef.current = current;
-    }
-  }, [activeCaffeineMg, hasCaf]);
-
-  // ── Live countdown — derived from activeCaffeineMg (updates via nowMs) ────
-  const totalSecsRef = useRef<number | null>(null);
-
-  // Track peak clearance time for ring progress ratio
-  useEffect(() => {
-    if (hasCaf && activeCaffeineMg > CAFFEINE_CLEAR_MG) {
-      const hl      = (HALF_LIVES.CAFFEINE / cafFactor) * (1 / healthKitMult);
-      const computed = clearanceSecs(activeCaffeineMg, hl);
-      if (totalSecsRef.current === null || computed > totalSecsRef.current) {
-        totalSecsRef.current = computed;
-      }
-    } else {
-      totalSecsRef.current = null;
-    }
-  }, [activeCaffeineMg, hasCaf, cafFactor, healthKitMult]);
-
-  // secs is a derived value — no separate state needed (activeCaffeineMg ticks via nowMs)
-  const secs = useMemo(() => {
-    if (hasCaf && activeCaffeineMg > CAFFEINE_CLEAR_MG) {
-      const hl = (HALF_LIVES.CAFFEINE / cafFactor) * (1 / healthKitMult);
-      return clearanceSecs(activeCaffeineMg, hl);
-    }
-    return DEMO_SECONDS;
-  }, [activeCaffeineMg, hasCaf, cafFactor, healthKitMult]);
-
-  const ringProgress =
-    hasCaf && totalSecsRef.current !== null && totalSecsRef.current > 0
-      ? secs / totalSecsRef.current
-      : 0.65;
-
-  // ── FAB handlers ─────────────────────────────────────────────────────────
-  const onFabPressIn  = useCallback(() => {
-    void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy);
-  }, []);
-  const onFabPressOut = useCallback(() => {}, []);
-
-  // Guest-aware Injector navigation: Reactor is always accessible, but the
-  // Injector prompts for login when cloud sync would silently fail.
-  const onFabPress = useCallback(() => {
-    if (!supabaseUserId) {
-      Alert.alert(
-        'LOGIN TO SYNC',
-        'You\'re in guest mode. Injections are saved locally only and will not sync across devices.\n\nLog in to enable full cloud sync.',
-        [
-          {
-            text: 'Continue as Guest',
-            style: 'default',
-            onPress: () => router.push('/inject'),
-          },
-          { text: 'Cancel', style: 'cancel' },
-        ],
-      );
-      return;
-    }
+  const onCustomLog = useCallback(() => {
+    void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     router.push('/inject');
-  }, [supabaseUserId]);
-
-  // ── Manual Sync Health button handler ────────────────────────────────────
-  const onManualSyncHealth = useCallback(async () => {
-    if (hkLoading) return;
-    setHkLoading(true);
-    setHkStatus('REQUESTING PERMISSIONS...');
-    try {
-      const result = await initHealthKit();
-      console.log("[HealthKit] initHealthKit result:", result);
-      if (result.status.available && result.status.authorized) {
-        setHkStatus(`HK ✓  MULTIPLIER: ${result.multiplier.toFixed(3)}  SAMPLES: ${result.samples.length}`);
-      } else if (!result.status.available) {
-        setHkStatus(
-          Platform.OS !== 'ios'
-            ? 'HK — NOT AVAILABLE ON ANDROID'
-            : 'HK — NOT AVAILABLE ON THIS DEVICE  ·  REQUIRES DEV BUILD (NOT EXPO GO)  ·  CHECK: IPAD OR RESTRICTED PERMISSIONS?',
-        );
-      } else {
-        setHkStatus(`HK ✗  ${result.status.error ?? 'PERMISSION DENIED — OPEN SETTINGS > HEALTH > HALF-LIFE'}`);
-      }
-    } catch (e) {
-      const msg = e instanceof Error ? e.message : String(e);
-      console.error("[HealthKit] Manual sync failed:", e);
-      setHkStatus(`HK ERROR: ${msg}`);
-    } finally {
-      setHkLoading(false);
-    }
-  }, [hkLoading]);
-
-  // ── Derived display values ───────────────────────────────────────────────
-  const displayMg = hasCaf ? activeCaffeineMg : 210;
-  const status    = resolveStatus(displayMg);
-
-  const sodiumPct = hasSodium ? Math.min(activeSodiumMg / SODIUM_LIMIT_MG, 1) : DEMO_SODIUM_PCT;
-  const sugarPct  = hasSugar  ? Math.min(activeSugarMg  / SUGAR_LIMIT_MG,  1) : DEMO_SUGAR_PCT;
-
-  const cafFooter = hasCaf
-    ? `${activeCaffeineMg.toFixed(0)} MG ACTIVE`
-    : 'DEMO  ·  LOG TO ACTIVATE';
-  const sodiumSub = hasSodium
-    ? `${activeSodiumMg.toFixed(0)} MG ACTIVE`
-    : '1,610 MG  ·  LIMIT 2,300 MG';
-  const sugarSub  = hasSugar
-    ? `${(activeSugarMg / 1_000).toFixed(1)} G ACTIVE`
-    : '10.0 G  ·  LIMIT 50 G';
+  }, []);
 
   const dateStr = new Date()
     .toLocaleDateString('en-US', { weekday: 'short', day: '2-digit', month: 'short' })
     .toUpperCase();
 
   const supabaseConfigured = !!(
-    process.env.EXPO_PUBLIC_SUPABASE_URL &&
-    process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY
+    process.env.EXPO_PUBLIC_SUPABASE_URL && process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY
   );
-
   const authLabel = !supabaseConfigured
     ? '⚠  SUPABASE ENV VARS MISSING'
-    : supabaseUserId
-      ? 'USER LOGGED IN'
-      : 'GUEST MODE';
-
-  const authColor = !supabaseConfigured
-    ? C.NEON_Y
-    : supabaseUserId
-      ? C.NEON_G
-      : C.MID;
+    : supabaseUserId ? 'SYNCED' : 'GUEST MODE';
+  const authColor = !supabaseConfigured ? color.energy : supabaseUserId ? color.ready : color.textMid;
 
   return (
     <SafeAreaView style={s.root} edges={['top', 'left', 'right']}>
-
-      {/* Background — plain dark View (LinearGradient removed, restore later) */}
-      <View style={[StyleSheet.absoluteFill, s.bgPlain]} />
-
       <ScrollView
         style={s.scroll}
-        contentContainerStyle={[s.scrollContent, { paddingBottom: insets.bottom + 100 }]}
+        contentContainerStyle={[s.scrollContent, { paddingBottom: insets.bottom + 110 }]}
         showsVerticalScrollIndicator={false}
-        bounces
       >
-
-      {/* §1  HEADER */}
-      <Animated.View style={[s.section1, { opacity: headerFadeAnim }]}>
-
+        {/* ── Top bar ─────────────────────────────────────────────────── */}
         <View style={s.topBar}>
-          <Text style={s.appName}>HALF-LIFE</Text>
+          <Text style={s.wordmark}>HALF-LIFE</Text>
           <View style={s.topBarRight}>
             <SyncIndicator />
-            <Text style={s.topBarDate}>{dateStr}</Text>
-            <View style={[s.liveDot, {
-              backgroundColor: status.color,
-              shadowColor:     status.color,
-              shadowOffset:    { width: 0, height: 0 },
-              shadowOpacity:   0.95,
-              shadowRadius:    8,
-              elevation:       6,
-            }]} />
+            <Text style={s.date}>{dateStr}</Text>
+            <View style={[s.liveDot, { backgroundColor: state.color, shadowColor: state.color }]} />
           </View>
         </View>
+        <Text style={[s.authLabel, { color: authColor }]}>{'•'}  {authLabel}</Text>
 
-        {/* Auth status badge */}
-        <View style={s.authRow}>
-          <Text style={[s.authLabel, { color: authColor }]}>
-            {'\u2022'}  {authLabel}
-          </Text>
-        </View>
+        <Animated.View style={{ opacity: fade, transform: [{ translateY: slide }] }}>
+          {/* ── Hero: energy state ─────────────────────────────────────── */}
+          <View style={s.hero}>
+            <Text style={s.eyebrow}>CURRENT STATE</Text>
+            {isEmpty ? (
+              <>
+                <Text style={[s.stateHeadline, { color: color.text }]}>WELCOME</Text>
+                <Text style={s.heroSub}>LOG YOUR FIRST COFFEE TO SEE YOUR STATE</Text>
+              </>
+            ) : (
+              <>
+                <Text style={[s.stateHeadline, { color: state.color, textShadowColor: alpha(state.color, 0.5) }]}>
+                  {state.label}
+                </Text>
+                <Text style={s.heroSub}>
+                  {hasCaf
+                    ? `${Math.round(activeCaf)} MG ACTIVE CAFFEINE`
+                    : 'NO CAFFEINE ACTIVE'}
+                </Text>
+              </>
+            )}
+          </View>
 
-        <View style={s.statusRow}>
-          <Text style={s.statusLabel}>SYSTEM STATUS</Text>
-          <Text style={[s.statusHeadline, {
-            color:         status.color,
-            shadowColor:   status.color,
-            shadowOffset:  { width: 0, height: 0 },
-            shadowOpacity: 0.85,
-            shadowRadius:  20,
-          }]}>
-            {status.text}
-          </Text>
-          {healthKitMult < 0.99 && (
-            <Text style={[s.hkBadge, { color: `${C.NEON_G}99` }]}>
-              {'\u2665'} RHR ACTIVE · {((1 - healthKitMult) * 100).toFixed(0)}% EXTENDED HALF-LIFE
-            </Text>
+          {/* ── Sleep-ready (hero feature) ─────────────────────────────── */}
+          <View style={s.sleepCard}>
+            <View>
+              <Text style={s.sleepLabel}>SLEEP-READY</Text>
+              <Text style={s.sleepSub}>CAFFEINE BELOW 5 MG</Text>
+            </View>
+            <View style={s.sleepRight}>
+              {readyAtMs ? (
+                <>
+                  <Text style={[s.sleepValue, { color: color.primary }]}>{fmtClock(readyAtMs)}</Text>
+                  <Text style={s.sleepRel}>≈ {fmtDuration(secsLeft)}</Text>
+                </>
+              ) : (
+                <Text style={[s.sleepValue, { color: color.ready }]}>NOW</Text>
+              )}
+            </View>
+          </View>
+
+          {/* ── Decay curve ────────────────────────────────────────────── */}
+          {hasCaf && (
+            <View style={s.curveCard}>
+              <Text style={s.curveLabel}>▸  CAFFEINE · NEXT 12H</Text>
+              <DecayCurve width={curveWidth} series={cafSeries} stroke={state.color} />
+            </View>
           )}
-        </View>
 
-        <View style={s.waveRow}>
-          {WAVE_BARS.map((h, i) => (
-            <View
-              key={i}
-              style={[s.waveBar, {
-                height:          h,
-                backgroundColor: i < WAVE_ACTIVE_COUNT ? status.color : C.BORDER,
-                opacity:         i < WAVE_ACTIVE_COUNT
-                  ? Math.max(0.3, 0.95 - i * 0.018)
-                  : 0.12,
-              }]}
+          {/* ── Quick log ──────────────────────────────────────────────── */}
+          <Pressable
+            onPress={onQuickLog}
+            onPressIn={() => void Haptics.selectionAsync()}
+            accessibilityRole="button"
+            accessibilityLabel="Log a coffee"
+            style={({ pressed }) => [
+              s.quickBtn,
+              { borderColor: color.primary, opacity: pressed ? 0.75 : 1 },
+            ]}
+          >
+            <Text style={s.quickBtnText}>+  LOG COFFEE</Text>
+            <Text style={s.quickBtnDose}>{QUICK_DOSE_MG} MG</Text>
+          </Pressable>
+
+          <Pressable onPress={onCustomLog} accessibilityRole="button" accessibilityLabel="Log something else">
+            <Text style={s.customLink}>LOG SOMETHING ELSE  →</Text>
+          </Pressable>
+
+          {/* ── Secondary tiles ────────────────────────────────────────── */}
+          <View style={s.tileRow}>
+            <Tile
+              label="ENERGY WINDOW"
+              value={sugarWindow ? sugarWindow.label : '—'}
+              sub={sugarWindow ? sugarWindow.sub : 'NO RECENT SUGAR'}
+              accent={color.energy}
             />
-          ))}
-        </View>
-        <Text style={s.waveCaption}>{'▸  CAFFEINE DECAY CURVE'}</Text>
-
-      </Animated.View>
-
-      {/* §2  REACTOR RING (View-based, SVG restored later) */}
-      <Animated.View
-        style={[
-          s.section2,
-          {
-            opacity:   ringFadeAnim,
-            transform: [{ scale: ringScaleAnim }],
-          },
-        ]}
-      >
-        <View style={s.ringContainer}>
-          <View
-            style={[s.glowAura, {
-              backgroundColor: C.BG,
-              shadowColor:     status.color,
-              shadowOffset:    { width: 0, height: 0 },
-              shadowOpacity:   0.95,
-              shadowRadius:    64,
-              elevation:       24,
-            }]}
-          />
-
-          <ReactorRing progress={ringProgress} color={status.color} />
-
-          {/* Timer overlay */}
-          <View style={s.ringInner}>
-            <View style={[s.scanLine, s.scanTop,    { borderColor: `${status.color}22` }]} />
-            <View style={[s.scanLine, s.scanBottom, { borderColor: `${status.color}22` }]} />
-
-            <Text style={[s.timerText, {
-              color:         status.color,
-              shadowColor:   status.color,
-              shadowOffset:  { width: 0, height: 0 },
-              shadowOpacity: 0.90,
-              shadowRadius:  16,
-            }]}>
-              {fmtTime(secs)}
-            </Text>
-
-            <View style={[s.timerRule, { backgroundColor: `${status.color}50` }]} />
-
-            <Text style={[s.timerCaption, { color: `${status.color}88` }]}>
-              {'UNTIL CAFFEINE\nCLEARED'}
-            </Text>
+            <Tile
+              label="SODIUM TODAY"
+              value={`${Math.round(sodiumTodayMg)}`}
+              sub={`/ ${SODIUM_LIMIT_MG} MG`}
+              accent={color.sodium}
+            />
           </View>
-
-        </View>
-
-        <Text style={s.ringFooter}>{cafFooter}</Text>
-      </Animated.View>
-
-      {/* §3  INSIGHT CARDS + BUTTONS */}
-      <View style={s.section3}>
-
-        <GlassCard accentColor={C.ELEC_B}>
-          <BarRow label="SODIUM LOAD"  pct={sodiumPct} color={C.ELEC_B}  sub={sodiumSub} />
-          <View style={s.barGap}>
-            <BarRow label="SUGAR SPIKE" pct={sugarPct}  color={C.BLOOD_R} sub={sugarSub}  />
-          </View>
-        </GlassCard>
-
-        {/* Manual Sync Health button */}
-        <Pressable
-          onPress={onManualSyncHealth}
-          accessibilityRole="button"
-          accessibilityLabel="Manual Sync Health"
-          style={({ pressed }) => [
-            s.syncBtn,
-            { borderColor: `${C.NEON_G}66`, opacity: pressed ? 0.7 : 1 },
-          ]}
-        >
-          <Text style={s.syncBtnText}>
-            {hkLoading ? '⟳  SYNCING...' : '♥  MANUAL SYNC HEALTH'}
-          </Text>
-          {hkStatus !== '' && (
-            <Text style={s.syncBtnSub}>{hkStatus}</Text>
-          )}
-        </Pressable>
-
-        {/* FAB — INJECT */}
-        <Pressable
-          onPressIn={onFabPressIn}
-          onPressOut={onFabPressOut}
-          onPress={onFabPress}
-          accessibilityRole="button"
-          accessibilityLabel="Open injector"
-        >
-          <View style={[s.fab, {
-            borderColor:   status.color,
-            shadowColor:   status.color,
-            shadowOffset:  { width: 0, height: 0 },
-            shadowOpacity: 0.90,
-            shadowRadius:  28,
-            elevation:     20,
-          }]}>
-            <Text style={[s.fabText, {
-              color:         status.color,
-              shadowColor:   status.color,
-              shadowOffset:  { width: 0, height: 0 },
-              shadowOpacity: 0.85,
-              shadowRadius:  10,
-            }]}>
-              +  INJECT
-            </Text>
-          </View>
-        </Pressable>
-
-      </View>
-
+        </Animated.View>
       </ScrollView>
     </SafeAreaView>
   );
@@ -634,301 +352,75 @@ export default function Dashboard() {
 // ─── Styles ───────────────────────────────────────────────────────────────────
 
 const s = StyleSheet.create({
-  root: {
-    flex: 1,
-    backgroundColor: C.BG,
-  },
-  bgPlain: {
-    backgroundColor: '#04040E',
-  },
-  scroll: {
-    flex: 1,
-  },
-  scrollContent: {
-    flexGrow: 1,
-  },
+  root:   { flex: 1, backgroundColor: color.bg },
+  scroll: { flex: 1 },
+  scrollContent: { paddingHorizontal: space.xl, paddingTop: space.md },
 
-  section1: {
-    paddingHorizontal: 22,
-    paddingTop: 10,
-    paddingBottom: 18,
-    gap: 12,
+  topBar: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
+  wordmark: {
+    fontFamily: font.mono, fontSize: T.label, letterSpacing: 8,
+    color: color.textDim, fontWeight: '700',
   },
-  topBar: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-  },
-  appName: {
-    fontFamily: MONO,
-    fontSize: 10,
-    letterSpacing: 8,
-    color: C.DIM,
-    fontWeight: '700',
-  },
-  topBarRight: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-  },
-  topBarDate: {
-    fontFamily: MONO,
-    fontSize: 10,
-    letterSpacing: 2,
-    color: C.MID,
-  },
+  topBarRight: { flexDirection: 'row', alignItems: 'center', gap: space.sm },
+  date: { fontFamily: font.mono, fontSize: T.label, letterSpacing: tracking.label, color: color.textMid },
   liveDot: {
-    width: 7,
-    height: 7,
-    borderRadius: 4,
+    width: 7, height: 7, borderRadius: 4,
+    shadowOffset: { width: 0, height: 0 }, shadowOpacity: 0.95, shadowRadius: 8, elevation: 6,
   },
-  syncBadge: {
-    borderWidth: 1,
-    borderRadius: 10,
-    paddingHorizontal: 8,
-    paddingVertical: 2,
+  authLabel: { fontFamily: font.mono, fontSize: T.micro, letterSpacing: tracking.label, marginTop: space.sm },
+
+  syncBadge: { borderWidth: 1, borderRadius: 10, paddingHorizontal: space.sm, paddingVertical: 2 },
+  syncBadgeText: { fontFamily: font.mono, fontSize: T.micro, letterSpacing: tracking.label, fontWeight: '700' },
+
+  // Hero
+  hero: { alignItems: 'center', marginTop: space.xxxl, marginBottom: space.xl },
+  eyebrow: { fontFamily: font.mono, fontSize: T.label, letterSpacing: tracking.wide, color: color.textMid, marginBottom: space.sm },
+  stateHeadline: {
+    fontFamily: font.mono, fontSize: 34, fontWeight: '900', letterSpacing: 3,
+    textShadowOffset: { width: 0, height: 0 }, textShadowRadius: 20,
   },
-  syncBadgeText: {
-    fontFamily: MONO,
-    fontSize: 7,
-    letterSpacing: 2,
-    fontWeight: '700',
+  heroSub: { fontFamily: font.mono, fontSize: T.body, letterSpacing: tracking.label, color: color.textMid, marginTop: space.sm },
+
+  // Sleep card
+  sleepCard: {
+    flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center',
+    backgroundColor: color.surface, borderRadius: 18, borderWidth: 1, borderColor: color.border,
+    paddingHorizontal: space.xl, paddingVertical: space.lg, marginBottom: space.md,
+  },
+  sleepLabel: { fontFamily: font.mono, fontSize: T.body, fontWeight: '700', letterSpacing: tracking.label, color: color.text },
+  sleepSub:   { fontFamily: font.mono, fontSize: T.micro, letterSpacing: tracking.label, color: color.textMid, marginTop: space.xs },
+  sleepRight: { alignItems: 'flex-end' },
+  sleepValue: { fontFamily: font.mono, fontSize: T.display, fontWeight: '900', letterSpacing: 1, fontVariant: ['tabular-nums'] },
+  sleepRel:   { fontFamily: font.mono, fontSize: T.micro, letterSpacing: tracking.label, color: color.textMid, marginTop: 2 },
+
+  // Curve
+  curveCard: {
+    backgroundColor: color.surface, borderRadius: 18, borderWidth: 1, borderColor: color.border,
+    padding: space.lg, marginBottom: space.lg,
+  },
+  curveLabel: { fontFamily: font.mono, fontSize: T.micro, letterSpacing: tracking.label, color: color.textMid, marginBottom: space.sm },
+
+  // Quick log
+  quickBtn: {
+    flexDirection: 'row', justifyContent: 'center', alignItems: 'baseline', gap: space.md,
+    borderWidth: 1.5, borderRadius: 16, paddingVertical: 18,
+    backgroundColor: alpha(color.primary, 0.06),
+    shadowColor: color.primary, shadowOffset: { width: 0, height: 0 }, shadowOpacity: 0.25, shadowRadius: 16, elevation: 8,
+  },
+  quickBtnText: { fontFamily: font.mono, fontSize: T.h2, fontWeight: '900', letterSpacing: tracking.wide, color: color.primary },
+  quickBtnDose: { fontFamily: font.mono, fontSize: T.label, letterSpacing: tracking.label, color: alpha(color.primary, 0.6) },
+  customLink: {
+    fontFamily: font.mono, fontSize: T.label, letterSpacing: tracking.label, color: color.textMid,
+    textAlign: 'center', marginTop: space.md, marginBottom: space.xl,
   },
 
-  authRow: {
-    alignItems: 'flex-start',
-    marginTop: 2,
+  // Tiles
+  tileRow: { flexDirection: 'row', gap: space.md },
+  tile: {
+    flex: 1, borderRadius: 14, borderWidth: 1,
+    backgroundColor: color.surface, padding: space.lg,
   },
-  authLabel: {
-    fontFamily:    MONO,
-    fontSize:      8,
-    letterSpacing: 2,
-  },
-
-  statusRow: {
-    alignItems: 'center',
-    gap: 2,
-  },
-  statusLabel: {
-    fontFamily: MONO,
-    fontSize: 9,
-    letterSpacing: 4,
-    color: C.MID,
-  },
-  statusHeadline: {
-    fontFamily: MONO,
-    fontSize: 22,
-    fontWeight: '900',
-    letterSpacing: 3,
-  },
-  hkBadge: {
-    fontFamily: MONO,
-    fontSize: 7,
-    letterSpacing: 2,
-    marginTop: 2,
-  },
-  waveRow: {
-    flexDirection: 'row',
-    alignItems: 'flex-end',
-    height: 40,
-    gap: 3,
-  },
-  waveBar: {
-    flex: 1,
-    borderRadius: 2,
-  },
-  waveCaption: {
-    fontFamily: MONO,
-    fontSize: 8,
-    letterSpacing: 3,
-    color: C.DIM,
-    textAlign: 'center',
-  },
-
-  section2: {
-    paddingVertical: 16,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  ringContainer: {
-    width: RING_SIZE,
-    height: RING_SIZE,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  glowAura: {
-    position:     'absolute',
-    width:        RING_SIZE,
-    height:       RING_SIZE,
-    borderRadius: RING_SIZE / 2,
-  },
-  ringInner: {
-    position:       'absolute',
-    left: 0, right: 0, top: 0, bottom: 0,
-    alignItems:     'center',
-    justifyContent: 'center',
-  },
-  scanLine: {
-    position:       'absolute',
-    left:           40,
-    right:          40,
-    height:         1,
-    borderTopWidth: 1,
-  },
-  scanTop:    { top:    '24%' },
-  scanBottom: { bottom: '24%' },
-  timerText: {
-    fontFamily:    MONO,
-    fontSize:      30,
-    fontWeight:    '700',
-    letterSpacing: 3,
-    fontVariant:   ['tabular-nums'],
-  },
-  timerRule: {
-    width:          48,
-    height:         1,
-    marginVertical: 10,
-  },
-  timerCaption: {
-    fontFamily:    MONO,
-    fontSize:      7,
-    letterSpacing: 2,
-    textAlign:     'center',
-    lineHeight:    13,
-  },
-  ringFooter: {
-    fontFamily:    MONO,
-    fontSize:      9,
-    letterSpacing: 3,
-    color:         C.DIM,
-    marginTop:     14,
-    textAlign:     'center',
-  },
-
-  section3: {
-    paddingHorizontal: 18,
-    paddingBottom:     12,
-    gap:               12,
-  },
-  glassWrapper: {
-    borderRadius:    24,
-    borderWidth:     1,
-    backgroundColor: '#0C0C0C',
-    shadowColor:     '#000000',
-    shadowOffset:    { width: 0, height: 6 },
-    shadowOpacity:   0.55,
-    shadowRadius:    16,
-    elevation:       10,
-  },
-  glassContent: {
-    padding:         20,
-    borderRadius:    24,
-    overflow:        'hidden',
-    backgroundColor: 'rgba(255,255,255,0.040)',
-  },
-
-  barGap: { marginTop: 16 },
-  barHeader: {
-    flexDirection:  'row',
-    justifyContent: 'space-between',
-    alignItems:     'center',
-    marginBottom:   8,
-  },
-  barLabel: {
-    fontFamily:    MONO,
-    fontSize:      10,
-    letterSpacing: 3,
-    color:         C.MID,
-    fontWeight:    '700',
-  },
-  barPct: {
-    fontFamily:    MONO,
-    fontSize:      14,
-    fontWeight:    '900',
-    letterSpacing: 1,
-  },
-  barTrackOuter: {
-    height:         14,
-    justifyContent: 'center',
-  },
-  barTrackBg: {
-    position:        'absolute',
-    left:            0,
-    right:           0,
-    height:          4,
-    borderRadius:    2,
-    backgroundColor: C.BORDER,
-  },
-  barGlow: {
-    position:     'absolute',
-    left:         0,
-    height:       12,
-    borderRadius: 6,
-    opacity:      0.24,
-  },
-  barFill: {
-    position:     'absolute',
-    left:         0,
-    height:       4,
-    borderRadius: 2,
-  },
-  barDot: {
-    position:     'absolute',
-    width:        7,
-    height:       7,
-    borderRadius: 4,
-    top:          3.5,
-    marginLeft:   -3.5,
-  },
-  barSub: {
-    fontFamily:    MONO,
-    fontSize:      9,
-    letterSpacing: 2,
-    color:         C.DIM,
-    marginTop:     5,
-  },
-
-  syncBtn: {
-    borderWidth:       1,
-    borderRadius:      16,
-    paddingVertical:   13,
-    paddingHorizontal: 16,
-    alignItems:        'center',
-    backgroundColor:   '#060F06',
-    shadowColor:       '#39FF14',
-    shadowOffset:      { width: 0, height: 2 },
-    shadowOpacity:     0.15,
-    shadowRadius:      8,
-    elevation:         4,
-  },
-  syncBtnText: {
-    fontFamily:    MONO,
-    fontSize:      11,
-    fontWeight:    '700',
-    letterSpacing: 4,
-    color:         C.NEON_G,
-  },
-  syncBtnSub: {
-    fontFamily:    MONO,
-    fontSize:      8,
-    letterSpacing: 1,
-    color:         C.MID,
-    marginTop:     5,
-    textAlign:     'center',
-  },
-
-  fab: {
-    borderWidth:     1.5,
-    borderRadius:    50,
-    paddingVertical: 20,
-    alignItems:      'center',
-    justifyContent:  'center',
-    backgroundColor: '#0A0A0F',
-  },
-  fabText: {
-    fontFamily:    MONO,
-    fontSize:      15,
-    fontWeight:    '900',
-    letterSpacing: 6,
-  },
+  tileLabel: { fontFamily: font.mono, fontSize: T.micro, letterSpacing: tracking.label, color: color.textMid, marginBottom: space.sm },
+  tileValue: { fontFamily: font.mono, fontSize: T.h1, fontWeight: '900', letterSpacing: 1 },
+  tileSub:   { fontFamily: font.mono, fontSize: T.micro, letterSpacing: 1, color: color.textDim, marginTop: space.xs },
 });
