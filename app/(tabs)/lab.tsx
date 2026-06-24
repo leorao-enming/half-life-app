@@ -37,7 +37,7 @@ const C = {
   TEXT:    color.text,
   DIM:     color.textDim,
   MID:     color.textMid,
-  SUB:     '#3A3A3A',
+  SUB:     color.border,
 } as const;
 
 const MONO = font.mono;
@@ -697,7 +697,7 @@ const s = StyleSheet.create({
   loadingText: {
     fontFamily:    MONO,
     fontSize:      9,
-    letterSpacing: 4,
+    letterSpacing: 2,
     color:         C.MID,
     marginTop:     8,
   },
@@ -719,14 +719,14 @@ const s = StyleSheet.create({
   authEyebrow: {
     fontFamily:    MONO,
     fontSize:      9,
-    letterSpacing: 4,
+    letterSpacing: 2,
     color:         C.MID,
   },
   authTitle: {
     fontFamily:    MONO,
-    fontSize:      30,
-    fontWeight:    '900',
-    letterSpacing: 6,
+    fontSize:      26,
+    fontWeight:    '200',
+    letterSpacing: 2,
     color:         C.TEXT,
   },
   authSubtitle: {
@@ -809,7 +809,7 @@ const s = StyleSheet.create({
     borderRadius:    10,
     paddingHorizontal: 14,
     paddingVertical:   12,
-    backgroundColor: '#0E0E0E',
+    backgroundColor: color.surface,
   },
   fieldSep: {
     height:        16,
@@ -837,7 +837,7 @@ const s = StyleSheet.create({
     paddingVertical:  19,
     alignItems:       'center',
     justifyContent:   'center',
-    backgroundColor:  '#0A0A14',
+    backgroundColor:  color.surface,
     shadowOffset:     { width: 0, height: 0 },
     shadowOpacity:    0.5,
     shadowRadius:     16,
@@ -847,8 +847,8 @@ const s = StyleSheet.create({
   submitBtnText: {
     fontFamily:    MONO,
     fontSize:      13,
-    fontWeight:    '900',
-    letterSpacing: 5,
+    fontWeight:    '500',
+    letterSpacing: 2,
   },
   authFooter: {
     fontFamily:    MONO,
@@ -873,14 +873,14 @@ const s = StyleSheet.create({
   headerEyebrow: {
     fontFamily:    MONO,
     fontSize:      9,
-    letterSpacing: 4,
+    letterSpacing: 2,
     color:         C.MID,
   },
   headerTitle: {
     fontFamily:    MONO,
     fontSize:      22,
-    fontWeight:    '900',
-    letterSpacing: 5,
+    fontWeight:    '200',
+    letterSpacing: 2,
     color:         C.TEXT,
     marginTop:     2,
   },
@@ -890,14 +890,14 @@ const s = StyleSheet.create({
   headerStatValue: {
     fontFamily:    MONO,
     fontSize:      28,
-    fontWeight:    '900',
+    fontWeight:    '200',
     color:         C.BLUE,
-    letterSpacing: 1,
+    letterSpacing: 0,
   },
   headerStatLabel: {
     fontFamily:    MONO,
     fontSize:      8,
-    letterSpacing: 4,
+    letterSpacing: 2,
     color:         C.MID,
   },
   headerDivider: {
@@ -918,7 +918,7 @@ const s = StyleSheet.create({
   sectionLabel: {
     fontFamily:    MONO,
     fontSize:      9,
-    letterSpacing: 4,
+    letterSpacing: 2,
     color:         C.MID,
     marginBottom:  10,
     marginLeft:    4,
@@ -927,8 +927,8 @@ const s = StyleSheet.create({
   // Glass card (plain View — BlurView removed)
   cardWrapper: {
     borderRadius:    24,
-    borderWidth:     1,
-    backgroundColor: '#0C0C0C',
+    borderWidth:     0.5,
+    backgroundColor: color.surface,
     shadowColor:     C.BLUE,
     shadowOffset:    { width: 0, height: 4 },
     shadowOpacity:   0.12,
@@ -1091,18 +1091,18 @@ const s = StyleSheet.create({
     alignItems:      'center',
   },
   clearBtnConfirm: {
-    borderColor:     '#FF073A',
-    backgroundColor: 'rgba(255, 7, 58, 0.08)',
+    borderColor:     C.PINK,
+    backgroundColor: alpha(C.PINK, 0.06),
   },
   clearBtnText: {
     fontFamily:    MONO,
     fontSize:      11,
-    letterSpacing: 3,
+    letterSpacing: 2,
     color:         C.MID,
-    fontWeight:    '700',
+    fontWeight:    '400',
   },
   clearBtnTextConfirm: {
-    color: '#FF073A',
+    color: C.PINK,
   },
 
   // Sign-out button

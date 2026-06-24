@@ -112,5 +112,5 @@ const s = StyleSheet.create({
   cornerGlow: { position: 'absolute', top: -10, right: -10, width: 60, height: 60, borderRadius: 30 },
   iconRow: { flexDirection: 'row', alignItems: 'center', gap: space.sm },
   label: { fontFamily: font.mono, fontSize: T.micro, fontWeight: '700', letterSpacing: 2, color: color.textMid, flex: 1, flexWrap: 'wrap' },
-  value: { fontFamily: font.mono, fontSize: T.h2, fontWeight: '900', color: color.text, lineHeight: 20 },
+  value: { fontFamily: font.mono, fontSize: T.h2, fontWeight: '200', color: color.text, lineHeight: 20 },
 });

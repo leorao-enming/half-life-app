@@ -1,7 +1,7 @@
 // =============================================================================
 // app/(tabs)/index.tsx — NOW
-// The home screen. Answers in one glance: what's my state right now, when can
-// I sleep, and gives a zero-friction way to log. Energy/performance framing.
+// One-glance answer: current energy state, when can I sleep, one-tap log.
+// Aesthetic: luxury instrument — one element glows, everything else retreats.
 // =============================================================================
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
@@ -18,7 +18,14 @@ import {
 import * as Haptics from 'expo-haptics';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { router } from 'expo-router';
-import Svg, { Defs, LinearGradient as SvgGradient, Stop, Path, Line } from 'react-native-svg';
+import Svg, {
+  Defs,
+  LinearGradient as SvgGradient,
+  Stop,
+  Path,
+  Line,
+  Text as SvgText,
+} from 'react-native-svg';
 
 import {
   selectAllLogs,
@@ -41,14 +48,32 @@ import { color, font, type as T, space, tracking, alpha } from '../../src/theme/
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
-const QUICK_DOSE_MG   = 95;     // a standard cup of drip coffee
-const SODIUM_LIMIT_MG = 2_300;  // FDA daily ceiling
+const QUICK_DOSE_MG   = 95;      // standard drip coffee
+const SODIUM_LIMIT_MG = 2_300;   // FDA daily ceiling
+const CAF_MAX_RING    = 400;     // 400 mg = full ring arc
 
-// ─── Env check (logged once) ──────────────────────────────────────────────────
-console.log(
-  '[now] EXPO_PUBLIC_SUPABASE_URL:',
-  process.env.EXPO_PUBLIC_SUPABASE_URL ?? '⚠ MISSING — add to .env and restart dev server',
-);
+// ─── SVG ring geometry ────────────────────────────────────────────────────────
+// 280° arc, gap centred at the bottom (6 o'clock).
+// START at 220° from 12 o'clock clockwise ≈ bottom-left (7:20).
+// END   at 140° from 12 o'clock clockwise ≈ bottom-right (4:40).
+
+const RS        = 220;   // ring canvas size
+const RR        = 88;    // ring radius
+const RC        = RS / 2; // centre x & y
+const R_START   = 220;   // start angle (degrees from 12 o'clock, clockwise)
+const R_SWEEP   = 280;   // total arc degrees
+
+function polarPt(r: number, deg: number) {
+  const rad = ((deg - 90) * Math.PI) / 180;
+  return { x: +(RC + r * Math.cos(rad)).toFixed(2), y: +(RC + r * Math.sin(rad)).toFixed(2) };
+}
+
+function arcPath(r: number, startDeg: number, sweepDeg: number): string {
+  if (sweepDeg < 0.5) return '';
+  const s = polarPt(r, startDeg);
+  const e = polarPt(r, startDeg + Math.min(sweepDeg, 359.9));
+  return `M${s.x} ${s.y} A${r} ${r} 0 ${sweepDeg > 180 ? 1 : 0} 1 ${e.x} ${e.y}`;
+}
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -71,19 +96,120 @@ function smoothLine(pts: [number, number][]): string {
 function smoothArea(pts: [number, number][], baseY: number): string {
   if (!pts.length) return '';
   const last = pts[pts.length - 1];
-  const first = pts[0];
-  return `${smoothLine(pts)} L ${last[0].toFixed(1)} ${baseY} L ${first[0].toFixed(1)} ${baseY} Z`;
+  return `${smoothLine(pts)} L ${last[0].toFixed(1)} ${baseY} L ${pts[0][0].toFixed(1)} ${baseY} Z`;
 }
 
-// ─── Caffeine decay curve (mini) ──────────────────────────────────────────────
+// ─── Ring hero ────────────────────────────────────────────────────────────────
+
+interface RingHeroProps {
+  activeCaf: number;
+  state:     { color: string; label: string; key: string };
+  isEmpty:   boolean;
+}
+
+function RingHero({ activeCaf, state, isEmpty }: RingHeroProps) {
+  const pct  = isEmpty ? 0 : Math.min(activeCaf / CAF_MAX_RING, 1);
+  const fill = pct * R_SWEEP;
+
+  return (
+    <View style={rs.wrap}>
+      <Svg width={RS} height={RS}>
+        {/* Outer track */}
+        <Path
+          d={arcPath(RR, R_START, R_SWEEP)}
+          stroke={alpha(color.text, 0.05)}
+          strokeWidth={1.5}
+          fill="none"
+          strokeLinecap="round"
+        />
+        {/* Inner accent track — a second fine ring for depth */}
+        <Path
+          d={arcPath(RR - 10, R_START, R_SWEEP)}
+          stroke={alpha(color.text, 0.02)}
+          strokeWidth={0.5}
+          fill="none"
+          strokeLinecap="round"
+        />
+        {/* Active fill */}
+        {fill > 0.5 && (
+          <Path
+            d={arcPath(RR, R_START, fill)}
+            stroke={state.color}
+            strokeWidth={1.5}
+            fill="none"
+            strokeLinecap="round"
+          />
+        )}
+      </Svg>
+
+      {/* Centre overlay — absolutely positioned over SVG */}
+      <View style={rs.centre}>
+        {isEmpty ? (
+          <Text style={rs.emptyHint}>LOG TO START</Text>
+        ) : (
+          <>
+            <Text style={rs.cafNum}>{Math.round(activeCaf)}</Text>
+            <Text style={rs.cafUnit}>MG CAFFEINE</Text>
+            <Text style={[rs.stateTag, { color: alpha(state.color, 0.85) }]}>
+              {state.label}
+            </Text>
+          </>
+        )}
+      </View>
+    </View>
+  );
+}
+
+const rs = StyleSheet.create({
+  wrap: {
+    alignSelf: 'center',
+    width: RS, height: RS,
+    alignItems: 'center', justifyContent: 'center',
+  },
+  centre: {
+    position: 'absolute',
+    width: RS, height: RS,
+    alignItems: 'center', justifyContent: 'center',
+  },
+  cafNum: {
+    fontSize:      T.display,
+    fontWeight:    '100',       // ultra-thin — the watch-hand move
+    color:         color.text,
+    letterSpacing: -1,
+    fontVariant:   ['tabular-nums'] as const,
+    lineHeight:    60,
+  },
+  cafUnit: {
+    fontFamily:    font.mono,
+    fontSize:      7,
+    color:         color.textMid,
+    letterSpacing: tracking.label,
+    marginTop:     6,
+  },
+  stateTag: {
+    fontFamily:    font.mono,
+    fontSize:      7,
+    letterSpacing: tracking.label,
+    marginTop:     8,
+    fontWeight:    '500',
+  },
+  emptyHint: {
+    fontFamily:    font.mono,
+    fontSize:      T.micro,
+    color:         color.textDim,
+    letterSpacing: tracking.label,
+  },
+});
+
+// ─── Instrument decay curve ───────────────────────────────────────────────────
 
 function DecayCurve({ width, series, stroke }: { width: number; series: number[]; stroke: string }) {
-  const H    = 72;
-  const padX = 2;
-  const padY = 6;
+  const H     = 80;
+  const padX  = 2;
+  const padY  = 8;
   const plotW = width - padX * 2;
   const plotH = H - padY * 2;
-  const max   = Math.max(...series, 1);
+  const max   = Math.max(...series, 10);
   const step  = plotW / Math.max(series.length - 1, 1);
 
   const pts: [number, number][] = series.map((v, i) => [
@@ -91,18 +217,51 @@ function DecayCurve({ width, series, stroke }: { width: number; series: number[]
     padY + plotH - (v / max) * plotH,
   ]);
 
+  // Y position for the 5 mg sleep-ready threshold
+  const threshY = padY + plotH - (5 / max) * plotH;
+  const showThresh = max > 8 && threshY > padY + 4 && threshY < H - padY;
+
   return (
     <Svg width={width} height={H}>
       <Defs>
-        <SvgGradient id="nowCafGrad" x1="0" y1="0" x2="0" y2="1">
-          <Stop offset="0"   stopColor={stroke} stopOpacity={0.28} />
-          <Stop offset="0.7" stopColor={stroke} stopOpacity={0.05} />
-          <Stop offset="1"   stopColor={stroke} stopOpacity={0} />
+        <SvgGradient id="lxCafGrad" x1="0" y1="0" x2="0" y2="1">
+          <Stop offset="0"   stopColor={stroke} stopOpacity={0.07} />
+          <Stop offset="1"   stopColor={stroke} stopOpacity={0}    />
         </SvgGradient>
       </Defs>
-      <Line x1={padX} y1={H - padY} x2={width - padX} y2={H - padY} stroke={alpha(color.text, 0.05)} strokeWidth={1} />
-      <Path d={smoothArea(pts, H - padY)} fill="url(#nowCafGrad)" />
-      <Path d={smoothLine(pts)} stroke={stroke} strokeWidth={2} fill="none" />
+
+      {/* Baseline */}
+      <Line
+        x1={padX} y1={H - padY}
+        x2={width - padX} y2={H - padY}
+        stroke={alpha(color.text, 0.04)} strokeWidth={0.5}
+      />
+
+      {/* 5 mg sleep threshold */}
+      {showThresh && (
+        <>
+          <Line
+            x1={padX} y1={threshY}
+            x2={width - padX} y2={threshY}
+            stroke={alpha(color.ready, 0.30)}
+            strokeWidth={0.5}
+            strokeDasharray="3 5"
+          />
+          <SvgText
+            x={width - padX}
+            y={threshY - 3}
+            fill={alpha(color.ready, 0.45)}
+            fontSize={6}
+            textAnchor="end"
+            fontFamily={font.mono}
+          >SLEEP</SvgText>
+        </>
+      )}
+
+      {/* Area fill — barely there */}
+      <Path d={smoothArea(pts, H - padY)} fill="url(#lxCafGrad)" />
+      {/* Line — thin, precise */}
+      <Path d={smoothLine(pts)} stroke={stroke} strokeWidth={1} fill="none" />
     </Svg>
   );
 }
@@ -113,11 +272,10 @@ function SyncIndicator() {
   const queueCount = useBioStore((s) => selectOfflineQueueCount(s));
   const syncStatus = useBioStore((s) => s.syncStatus);
   if (queueCount === 0 && syncStatus !== 'error') return null;
-
   const c     = syncStatus === 'error' ? color.alert : color.energy;
   const label = syncStatus === 'error' ? 'SYNC ERROR' : `${queueCount} PENDING`;
   return (
-    <View style={[s.syncBadge, { borderColor: alpha(c, 0.27), backgroundColor: alpha(c, 0.06) }]}>
+    <View style={[s.syncBadge, { borderColor: alpha(c, 0.20), backgroundColor: alpha(c, 0.05) }]}>
       <Text style={[s.syncBadgeText, { color: c }]}>{label}</Text>
     </View>
   );
@@ -127,9 +285,9 @@ function SyncIndicator() {
 
 function Tile({ label, value, sub, accent }: { label: string; value: string; sub: string; accent: string }) {
   return (
-    <View style={[s.tile, { borderColor: alpha(accent, 0.18) }]}>
+    <View style={[s.tile, { borderColor: alpha(accent, 0.12) }]}>
       <Text style={s.tileLabel}>{label}</Text>
-      <Text style={[s.tileValue, { color: accent }]}>{value}</Text>
+      <Text style={[s.tileValue, { color: alpha(accent, 0.9) }]}>{value}</Text>
       <Text style={s.tileSub}>{sub}</Text>
     </View>
   );
@@ -137,19 +295,24 @@ function Tile({ label, value, sub, accent }: { label: string; value: string; sub
 
 // ─── NOW screen ───────────────────────────────────────────────────────────────
 
-export default function Now() {
-  const insets = useSafeAreaInsets();
-  const { width: screenW } = useWindowDimensions();
-  const curveWidth = screenW - space.xl * 2 - space.lg * 2;
+console.log(
+  '[now] EXPO_PUBLIC_SUPABASE_URL:',
+  process.env.EXPO_PUBLIC_SUPABASE_URL ?? '⚠ MISSING',
+);
 
-  // Raw store data — stable selectors, no Date.now() inside
+export default function Now() {
+  const insets    = useSafeAreaInsets();
+  const { width } = useWindowDimensions();
+  const curveW    = width - space.xl * 2 - space.lg * 2;
+
   const logs          = useBioStore(selectAllLogs);
   const cafFactor     = useBioStore(selectCafFactor);
   const sodiumFactor  = useBioStore(selectSodiumFactor);
   const healthKitMult = useBioStore(selectHealthKitMultiplier);
   const supabaseUserId = useBioStore((st) => st.supabaseUserId);
 
-  // nowMs ticks every second; drives all time-based computations
+  // nowMs ticks every second — drives all time-based computations.
+  // NEVER call Date.now() inside a selector: causes infinite re-render.
   const [nowMs, setNowMs] = useState(() => Date.now());
   useEffect(() => {
     const id = setInterval(() => setNowMs(Date.now()), 1_000);
@@ -165,63 +328,60 @@ export default function Now() {
   );
   const halfLife  = useMemo(() => effectiveCaffeineHalfLife(cafFactor, healthKitMult), [cafFactor, healthKitMult]);
   const state     = classifyEnergyState(activeCaf);
-  const readyAtMs = useMemo(() => sleepReadyAt(activeCaf, halfLife, nowMs), [activeCaf, halfLife, nowMs]);
-  const secsLeft  = useMemo(() => clearanceSecs(activeCaf, halfLife), [activeCaf, halfLife]);
+  const readyAtMs = useMemo(() => sleepReadyAt(activeCaf, halfLife, nowMs),  [activeCaf, halfLife, nowMs]);
+  const secsLeft  = useMemo(() => clearanceSecs(activeCaf, halfLife),         [activeCaf, halfLife]);
 
-  // Caffeine forecast curve (12h)
   const cafSeries = useMemo(
     () => generateForecast(logs, cafFactor, healthKitMult, nowMs).map((p) => p.caffeine),
     [logs, cafFactor, healthKitMult, nowMs],
   );
 
-  // Energy window (sugar) — honest rough gauge, NOT exponential decay
+  // Sugar: recency gauge — not exponential decay
   const sugarWindow = useMemo(() => {
     const sugar = logs.filter((l) => l.substanceType === 'sugar');
     if (!sugar.length) return null;
     const mins = (nowMs - Math.max(...sugar.map((l) => l.timestamp))) / 60_000;
     if (mins > 120) return null;
-    if (mins < 45)  return { label: 'PEAK',   sub: `${Math.round(mins)}M IN` };
-    if (mins < 90)  return { label: 'FADING', sub: `${Math.round(mins)}M IN` };
-    return                 { label: 'LOW',    sub: `${Math.round(mins)}M IN` };
+    if (mins < 45)  return { label: 'PEAK',   sub: `${Math.round(mins)}M AGO` };
+    if (mins < 90)  return { label: 'FADING', sub: `${Math.round(mins)}M AGO` };
+    return                 { label: 'LOW',    sub: `${Math.round(mins)}M AGO` };
   }, [logs, nowMs]);
 
-  // Sodium today — simple cumulative daily total, no half-life claim
+  // Sodium: simple daily cumulative
   const sodiumTodayMg = useMemo(() => {
     const midnight = new Date(); midnight.setHours(0, 0, 0, 0);
-    const m0 = midnight.getTime();
     return logs
-      .filter((l) => l.substanceType === 'sodium' && l.timestamp >= m0)
+      .filter((l) => l.substanceType === 'sodium' && l.timestamp >= midnight.getTime())
       .reduce((sum, l) => sum + l.amountMg, 0);
   }, [logs, nowMs]);
 
   // Entrance animation
   const fade  = useRef(new Animated.Value(0)).current;
-  const slide = useRef(new Animated.Value(12)).current;
+  const slide = useRef(new Animated.Value(8)).current;
   useEffect(() => {
     Animated.parallel([
-      Animated.timing(fade,  { toValue: 1, duration: 500, useNativeDriver: true }),
-      Animated.timing(slide, { toValue: 0, duration: 500, useNativeDriver: true }),
+      Animated.timing(fade,  { toValue: 1, duration: 800, useNativeDriver: true }),
+      Animated.timing(slide, { toValue: 0, duration: 700, useNativeDriver: true }),
     ]).start();
   }, [fade, slide]);
 
-  // BioState haptic on threshold crossings
+  // Haptic on energy state threshold crossings
   const prevKeyRef = useRef(state.key);
   useEffect(() => {
     if (state.key !== prevKeyRef.current) {
-      if (state.key === 'PEAK')        void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
-      else if (state.key === 'CLEAR' && hasCaf) void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+      if (state.key === 'PEAK')
+        void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
+      else if (state.key === 'CLEAR' && hasCaf)
+        void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
       prevKeyRef.current = state.key;
     }
   }, [state.key, hasCaf]);
 
-  // Quick-log a standard coffee — zero-friction logging
   const onQuickLog = useCallback(() => {
     void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
     useBioStore.getState().addLog({
-      label:         'COFFEE',
-      substanceType: 'caffeine',
-      amountMg:      QUICK_DOSE_MG,
-      timestamp:     Date.now(),
+      label: 'COFFEE', substanceType: 'caffeine',
+      amountMg: QUICK_DOSE_MG, timestamp: Date.now(),
     });
   }, []);
 
@@ -237,10 +397,12 @@ export default function Now() {
   const supabaseConfigured = !!(
     process.env.EXPO_PUBLIC_SUPABASE_URL && process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY
   );
+  const authColor = !supabaseConfigured
+    ? color.energy
+    : supabaseUserId ? color.ready : color.textMid;
   const authLabel = !supabaseConfigured
-    ? '⚠  SUPABASE ENV VARS MISSING'
-    : supabaseUserId ? 'SYNCED' : 'GUEST MODE';
-  const authColor = !supabaseConfigured ? color.energy : supabaseUserId ? color.ready : color.textMid;
+    ? 'SUPABASE NOT CONFIGURED'
+    : supabaseUserId ? 'SYNCED' : 'GUEST';
 
   return (
     <SafeAreaView style={s.root} edges={['top', 'left', 'right']}>
@@ -249,100 +411,92 @@ export default function Now() {
         contentContainerStyle={[s.scrollContent, { paddingBottom: insets.bottom + 110 }]}
         showsVerticalScrollIndicator={false}
       >
-        {/* ── Top bar ─────────────────────────────────────────────────── */}
+        {/* ── Top bar ──────────────────────────────────────────────────── */}
         <View style={s.topBar}>
-          <Text style={s.wordmark}>HALF-LIFE</Text>
-          <View style={s.topBarRight}>
+          <Text style={s.wordmark}>HALF·LIFE</Text>
+          <View style={s.topRight}>
             <SyncIndicator />
             <Text style={s.date}>{dateStr}</Text>
-            <View style={[s.liveDot, { backgroundColor: state.color, shadowColor: state.color }]} />
+            <View style={[s.liveDot, { backgroundColor: state.color }]} />
           </View>
         </View>
-        <Text style={[s.authLabel, { color: authColor }]}>{'•'}  {authLabel}</Text>
+
+        <Text style={[s.authLine, { color: alpha(authColor, 0.55) }]}>{authLabel}</Text>
 
         <Animated.View style={{ opacity: fade, transform: [{ translateY: slide }] }}>
-          {/* ── Hero: energy state ─────────────────────────────────────── */}
-          <View style={s.hero}>
-            <Text style={s.eyebrow}>CURRENT STATE</Text>
-            {isEmpty ? (
-              <>
-                <Text style={[s.stateHeadline, { color: color.text }]}>WELCOME</Text>
-                <Text style={s.heroSub}>LOG YOUR FIRST COFFEE TO SEE YOUR STATE</Text>
-              </>
-            ) : (
-              <>
-                <Text style={[s.stateHeadline, { color: state.color, textShadowColor: alpha(state.color, 0.5) }]}>
-                  {state.label}
-                </Text>
-                <Text style={s.heroSub}>
-                  {hasCaf
-                    ? `${Math.round(activeCaf)} MG ACTIVE CAFFEINE`
-                    : 'NO CAFFEINE ACTIVE'}
-                </Text>
-              </>
+
+          {/* ── Ring hero ─────────────────────────────────────────────── */}
+          <View style={s.ringSection}>
+            <RingHero activeCaf={activeCaf} state={state} isEmpty={isEmpty} />
+            {isEmpty && (
+              <Text style={s.emptyInvite}>
+                LOG YOUR FIRST COFFEE{'\n'}TO SEE YOUR STATE
+              </Text>
             )}
           </View>
 
-          {/* ── Sleep-ready (hero feature) ─────────────────────────────── */}
+          {/* ── Sleep-ready card ──────────────────────────────────────── */}
           <View style={s.sleepCard}>
             <View>
               <Text style={s.sleepLabel}>SLEEP-READY</Text>
-              <Text style={s.sleepSub}>CAFFEINE BELOW 5 MG</Text>
+              <Text style={s.sleepSub}>caffeine below 5 mg</Text>
             </View>
             <View style={s.sleepRight}>
               {readyAtMs ? (
                 <>
-                  <Text style={[s.sleepValue, { color: color.primary }]}>{fmtClock(readyAtMs)}</Text>
+                  <Text style={[s.sleepTime, { color: color.primary }]}>{fmtClock(readyAtMs)}</Text>
                   <Text style={s.sleepRel}>≈ {fmtDuration(secsLeft)}</Text>
                 </>
               ) : (
-                <Text style={[s.sleepValue, { color: color.ready }]}>NOW</Text>
+                <Text style={[s.sleepTime, { color: color.ready }]}>NOW</Text>
               )}
             </View>
           </View>
 
-          {/* ── Decay curve ────────────────────────────────────────────── */}
+          {/* ── Decay curve ───────────────────────────────────────────── */}
           {hasCaf && (
             <View style={s.curveCard}>
-              <Text style={s.curveLabel}>▸  CAFFEINE · NEXT 12H</Text>
-              <DecayCurve width={curveWidth} series={cafSeries} stroke={state.color} />
+              <Text style={s.curveLabel}>CAFFEINE  ·  NEXT 12H</Text>
+              <DecayCurve width={curveW} series={cafSeries} stroke={state.color} />
             </View>
           )}
 
-          {/* ── Quick log ──────────────────────────────────────────────── */}
+          {/* ── Quick log ─────────────────────────────────────────────── */}
           <Pressable
             onPress={onQuickLog}
             onPressIn={() => void Haptics.selectionAsync()}
             accessibilityRole="button"
             accessibilityLabel="Log a coffee"
-            style={({ pressed }) => [
-              s.quickBtn,
-              { borderColor: color.primary, opacity: pressed ? 0.75 : 1 },
-            ]}
+            style={({ pressed }) => [s.logBtn, { opacity: pressed ? 0.65 : 1 }]}
           >
-            <Text style={s.quickBtnText}>+  LOG COFFEE</Text>
-            <Text style={s.quickBtnDose}>{QUICK_DOSE_MG} MG</Text>
+            <Text style={s.logBtnText}>LOG COFFEE</Text>
+            <Text style={s.logBtnDose}>· {QUICK_DOSE_MG} MG</Text>
           </Pressable>
 
-          <Pressable onPress={onCustomLog} accessibilityRole="button" accessibilityLabel="Log something else">
-            <Text style={s.customLink}>LOG SOMETHING ELSE  →</Text>
+          <Pressable
+            onPress={onCustomLog}
+            accessibilityRole="button"
+            accessibilityLabel="Log something else"
+          >
+            <Text style={s.moreLink}>LOG SOMETHING ELSE  →</Text>
           </Pressable>
 
-          {/* ── Secondary tiles ────────────────────────────────────────── */}
+          {/* ── Secondary tiles ───────────────────────────────────────── */}
           <View style={s.tileRow}>
             <Tile
               label="ENERGY WINDOW"
               value={sugarWindow ? sugarWindow.label : '—'}
-              sub={sugarWindow ? sugarWindow.sub : 'NO RECENT SUGAR'}
+              sub={sugarWindow ? sugarWindow.sub : 'no recent sugar'}
               accent={color.energy}
             />
             <Tile
               label="SODIUM TODAY"
               value={`${Math.round(sodiumTodayMg)}`}
-              sub={`/ ${SODIUM_LIMIT_MG} MG`}
+              sub={`/ ${SODIUM_LIMIT_MG} mg`}
               accent={color.sodium}
             />
           </View>
+
         </Animated.View>
       </ScrollView>
     </SafeAreaView>
@@ -356,71 +510,178 @@ const s = StyleSheet.create({
   scroll: { flex: 1 },
   scrollContent: { paddingHorizontal: space.xl, paddingTop: space.md },
 
-  topBar: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
+  // Top bar
+  topBar: {
+    flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center',
+    marginBottom: 2,
+  },
   wordmark: {
-    fontFamily: font.mono, fontSize: T.label, letterSpacing: 8,
-    color: color.textDim, fontWeight: '700',
+    fontFamily:    font.mono,
+    fontSize:      T.micro,
+    letterSpacing: 6,
+    color:         color.textDim,
+    fontWeight:    '400',
   },
-  topBarRight: { flexDirection: 'row', alignItems: 'center', gap: space.sm },
-  date: { fontFamily: font.mono, fontSize: T.label, letterSpacing: tracking.label, color: color.textMid },
+  topRight: { flexDirection: 'row', alignItems: 'center', gap: space.sm },
+  date:     {
+    fontFamily:    font.mono,
+    fontSize:      T.micro,
+    letterSpacing: tracking.label,
+    color:         color.textMid,
+  },
   liveDot: {
-    width: 7, height: 7, borderRadius: 4,
-    shadowOffset: { width: 0, height: 0 }, shadowOpacity: 0.95, shadowRadius: 8, elevation: 6,
+    width: 5, height: 5, borderRadius: 3,
+    opacity: 0.85,
   },
-  authLabel: { fontFamily: font.mono, fontSize: T.micro, letterSpacing: tracking.label, marginTop: space.sm },
-
-  syncBadge: { borderWidth: 1, borderRadius: 10, paddingHorizontal: space.sm, paddingVertical: 2 },
-  syncBadgeText: { fontFamily: font.mono, fontSize: T.micro, letterSpacing: tracking.label, fontWeight: '700' },
-
-  // Hero
-  hero: { alignItems: 'center', marginTop: space.xxxl, marginBottom: space.xl },
-  eyebrow: { fontFamily: font.mono, fontSize: T.label, letterSpacing: tracking.wide, color: color.textMid, marginBottom: space.sm },
-  stateHeadline: {
-    fontFamily: font.mono, fontSize: 34, fontWeight: '900', letterSpacing: 3,
-    textShadowOffset: { width: 0, height: 0 }, textShadowRadius: 20,
+  authLine: {
+    fontFamily:    font.mono,
+    fontSize:      T.micro,
+    letterSpacing: tracking.label,
+    marginBottom:  space.sm,
   },
-  heroSub: { fontFamily: font.mono, fontSize: T.body, letterSpacing: tracking.label, color: color.textMid, marginTop: space.sm },
+  syncBadge: {
+    borderWidth: 1, borderRadius: 8,
+    paddingHorizontal: space.sm, paddingVertical: 2,
+  },
+  syncBadgeText: {
+    fontFamily: font.mono, fontSize: T.micro, letterSpacing: tracking.label, fontWeight: '600',
+  },
+
+  // Ring section
+  ringSection: { alignItems: 'center', marginTop: space.xl, marginBottom: space.xl },
+  emptyInvite: {
+    fontFamily:    font.mono,
+    fontSize:      T.label,
+    letterSpacing: tracking.label,
+    color:         color.textMid,
+    textAlign:     'center',
+    marginTop:     space.sm,
+    lineHeight:    16,
+  },
 
   // Sleep card
   sleepCard: {
-    flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center',
-    backgroundColor: color.surface, borderRadius: 18, borderWidth: 1, borderColor: color.border,
-    paddingHorizontal: space.xl, paddingVertical: space.lg, marginBottom: space.md,
+    flexDirection:   'row',
+    justifyContent:  'space-between',
+    alignItems:      'center',
+    backgroundColor: color.surface,
+    borderRadius:    20,
+    borderWidth:     0.5,
+    borderColor:     color.border,
+    paddingHorizontal: space.xl,
+    paddingVertical:   space.lg,
+    marginBottom:    space.md,
   },
-  sleepLabel: { fontFamily: font.mono, fontSize: T.body, fontWeight: '700', letterSpacing: tracking.label, color: color.text },
-  sleepSub:   { fontFamily: font.mono, fontSize: T.micro, letterSpacing: tracking.label, color: color.textMid, marginTop: space.xs },
+  sleepLabel: {
+    fontFamily:    font.mono,
+    fontSize:      T.label,
+    fontWeight:    '600',
+    letterSpacing: tracking.label,
+    color:         color.text,
+  },
+  sleepSub: {
+    fontFamily:    font.mono,
+    fontSize:      T.micro,
+    letterSpacing: tracking.tight,
+    color:         color.textMid,
+    marginTop:     space.xs,
+  },
   sleepRight: { alignItems: 'flex-end' },
-  sleepValue: { fontFamily: font.mono, fontSize: T.display, fontWeight: '900', letterSpacing: 1, fontVariant: ['tabular-nums'] },
-  sleepRel:   { fontFamily: font.mono, fontSize: T.micro, letterSpacing: tracking.label, color: color.textMid, marginTop: 2 },
+  sleepTime: {
+    fontFamily:    font.mono,
+    fontSize:      28,
+    fontWeight:    '200',
+    letterSpacing: 0,
+    fontVariant:   ['tabular-nums'] as const,
+  },
+  sleepRel: {
+    fontFamily:    font.mono,
+    fontSize:      T.micro,
+    letterSpacing: tracking.label,
+    color:         color.textMid,
+    marginTop:     2,
+  },
 
-  // Curve
+  // Curve card
   curveCard: {
-    backgroundColor: color.surface, borderRadius: 18, borderWidth: 1, borderColor: color.border,
-    padding: space.lg, marginBottom: space.lg,
+    backgroundColor: color.surface,
+    borderRadius:    20,
+    borderWidth:     0.5,
+    borderColor:     color.border,
+    padding:         space.lg,
+    marginBottom:    space.lg,
   },
-  curveLabel: { fontFamily: font.mono, fontSize: T.micro, letterSpacing: tracking.label, color: color.textMid, marginBottom: space.sm },
+  curveLabel: {
+    fontFamily:    font.mono,
+    fontSize:      T.micro,
+    letterSpacing: tracking.label,
+    color:         color.textMid,
+    marginBottom:  space.sm,
+  },
 
-  // Quick log
-  quickBtn: {
-    flexDirection: 'row', justifyContent: 'center', alignItems: 'baseline', gap: space.md,
-    borderWidth: 1.5, borderRadius: 16, paddingVertical: 18,
-    backgroundColor: alpha(color.primary, 0.06),
-    shadowColor: color.primary, shadowOffset: { width: 0, height: 0 }, shadowOpacity: 0.25, shadowRadius: 16, elevation: 8,
+  // Log button
+  logBtn: {
+    flexDirection:   'row',
+    justifyContent:  'center',
+    alignItems:      'baseline',
+    gap:             space.sm,
+    borderWidth:     0.5,
+    borderRadius:    18,
+    borderColor:     alpha(color.primary, 0.25),
+    paddingVertical: 18,
+    backgroundColor: alpha(color.primary, 0.04),
   },
-  quickBtnText: { fontFamily: font.mono, fontSize: T.h2, fontWeight: '900', letterSpacing: tracking.wide, color: color.primary },
-  quickBtnDose: { fontFamily: font.mono, fontSize: T.label, letterSpacing: tracking.label, color: alpha(color.primary, 0.6) },
-  customLink: {
-    fontFamily: font.mono, fontSize: T.label, letterSpacing: tracking.label, color: color.textMid,
-    textAlign: 'center', marginTop: space.md, marginBottom: space.xl,
+  logBtnText: {
+    fontFamily:    font.mono,
+    fontSize:      T.h2,
+    fontWeight:    '500',
+    letterSpacing: tracking.wide,
+    color:         color.primary,
+  },
+  logBtnDose: {
+    fontFamily:    font.mono,
+    fontSize:      T.label,
+    letterSpacing: tracking.label,
+    color:         alpha(color.primary, 0.45),
+  },
+  moreLink: {
+    fontFamily:    font.mono,
+    fontSize:      T.label,
+    letterSpacing: tracking.label,
+    color:         color.textMid,
+    textAlign:     'center',
+    marginTop:     space.md,
+    marginBottom:  space.xl,
   },
 
   // Tiles
   tileRow: { flexDirection: 'row', gap: space.md },
   tile: {
-    flex: 1, borderRadius: 14, borderWidth: 1,
-    backgroundColor: color.surface, padding: space.lg,
+    flex:            1,
+    borderRadius:    16,
+    borderWidth:     0.5,
+    backgroundColor: color.surface,
+    padding:         space.lg,
   },
-  tileLabel: { fontFamily: font.mono, fontSize: T.micro, letterSpacing: tracking.label, color: color.textMid, marginBottom: space.sm },
-  tileValue: { fontFamily: font.mono, fontSize: T.h1, fontWeight: '900', letterSpacing: 1 },
-  tileSub:   { fontFamily: font.mono, fontSize: T.micro, letterSpacing: 1, color: color.textDim, marginTop: space.xs },
+  tileLabel: {
+    fontFamily:    font.mono,
+    fontSize:      T.micro,
+    letterSpacing: tracking.label,
+    color:         color.textMid,
+    marginBottom:  space.sm,
+  },
+  tileValue: {
+    fontFamily:    font.mono,
+    fontSize:      T.h1,
+    fontWeight:    '300',
+    letterSpacing: 0,
+    fontVariant:   ['tabular-nums'] as const,
+  },
+  tileSub: {
+    fontFamily:    font.mono,
+    fontSize:      T.micro,
+    letterSpacing: tracking.tight,
+    color:         color.textDim,
+    marginTop:     space.xs,
+  },
 });

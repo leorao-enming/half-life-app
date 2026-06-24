@@ -250,15 +250,15 @@ const s = StyleSheet.create({
   scrollContent: { paddingHorizontal: space.xl },
 
   titleBlock: { marginBottom: space.xxl },
-  eyebrow:   { fontFamily: font.mono, fontSize: T.label, letterSpacing: tracking.wide, color: color.textMid, marginBottom: 5 },
-  pageTitle: { fontFamily: font.mono, fontSize: 26, fontWeight: '900', letterSpacing: 3, color: color.primary },
+  eyebrow:   { fontFamily: font.mono, fontSize: T.label, letterSpacing: tracking.label, color: color.textMid, marginBottom: 5 },
+  pageTitle: { fontFamily: font.mono, fontSize: 24, fontWeight: '200', letterSpacing: 1, color: color.primary },
 
-  sectionLabel: { fontFamily: font.mono, fontSize: T.label, letterSpacing: tracking.wide, color: color.textMid, marginBottom: space.md, marginLeft: 2 },
+  sectionLabel: { fontFamily: font.mono, fontSize: T.label, letterSpacing: tracking.label, color: color.textMid, marginBottom: space.md, marginLeft: 2 },
   sectionGap:   { marginTop: space.xxl },
 
   card: {
-    borderRadius: 18, borderWidth: 1, borderColor: color.border, backgroundColor: color.surface,
-    shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.35, shadowRadius: 8, elevation: 5,
+    borderRadius: 20, borderWidth: 0.5, borderColor: color.border, backgroundColor: color.surface,
+    shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.12, shadowRadius: 8, elevation: 3,
   },
   cardInner:    { padding: space.lg, paddingBottom: space.md },
   cardSubtitle: { fontFamily: font.mono, fontSize: T.micro, letterSpacing: tracking.label, color: color.textMid, marginBottom: space.lg },
@@ -271,5 +271,5 @@ const s = StyleSheet.create({
     backgroundColor: color.surface, padding: space.lg,
   },
   statLabel: { fontFamily: font.mono, fontSize: T.micro, letterSpacing: tracking.label, color: color.textMid, marginBottom: space.md },
-  statValue: { fontFamily: font.mono, fontSize: 26, fontWeight: '900', letterSpacing: 1 },
+  statValue: { fontFamily: font.mono, fontSize: 24, fontWeight: '200', letterSpacing: 0 },
 });

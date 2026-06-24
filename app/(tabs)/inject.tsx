@@ -230,8 +230,8 @@ const s = StyleSheet.create({
     flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-end',
     paddingHorizontal: space.xxl, paddingTop: space.lg, paddingBottom: space.md,
   },
-  eyebrow: { fontFamily: font.mono, fontSize: T.label, letterSpacing: tracking.wide, color: color.textMid },
-  title:   { fontFamily: font.mono, fontSize: T.h1, fontWeight: '900', letterSpacing: 3, color: color.text },
+  eyebrow: { fontFamily: font.mono, fontSize: T.label, letterSpacing: tracking.label, color: color.textMid },
+  title:   { fontFamily: font.mono, fontSize: T.h1, fontWeight: '200', letterSpacing: 1, color: color.text },
   headerRight: { flexDirection: 'row', alignItems: 'center' },
   statusPill: {
     flexDirection: 'row', alignItems: 'center', gap: space.sm,
@@ -244,26 +244,26 @@ const s = StyleSheet.create({
 
   cards: { flex: 1, paddingHorizontal: space.lg, gap: space.md },
   card: {
-    flex: 1, borderRadius: 18, borderWidth: 1, backgroundColor: color.surface,
+    flex: 1, borderRadius: 20, borderWidth: 0.5, backgroundColor: color.surface,
     padding: space.lg, overflow: 'hidden', justifyContent: 'space-between',
   },
   flash: { ...StyleSheet.absoluteFillObject },
   cardHead: { flexDirection: 'row', alignItems: 'flex-start' },
-  sublabel: { fontFamily: font.mono, fontSize: T.label, letterSpacing: tracking.wide, fontWeight: '600' },
-  label:    { fontFamily: font.mono, fontSize: 26, fontWeight: '900', letterSpacing: 2, marginTop: 2 },
+  sublabel: { fontFamily: font.mono, fontSize: T.label, letterSpacing: tracking.label, fontWeight: '400' },
+  label:    { fontFamily: font.mono, fontSize: 26, fontWeight: '200', letterSpacing: 0, marginTop: 2 },
   desc:     { fontFamily: font.mono, fontSize: T.micro, letterSpacing: 2, color: color.textMid, marginTop: space.xs },
 
   chipRow: { flexDirection: 'row', gap: space.sm, marginVertical: space.md },
   chip: {
     flex: 1, borderWidth: 1, borderRadius: 12, paddingVertical: space.sm, alignItems: 'center', gap: 2,
   },
-  chipLabel: { fontFamily: font.mono, fontSize: T.label, letterSpacing: tracking.label, fontWeight: '700' },
+  chipLabel: { fontFamily: font.mono, fontSize: T.label, letterSpacing: tracking.label, fontWeight: '400' },
   chipDose:  { fontFamily: font.mono, fontSize: T.micro, letterSpacing: 1 },
 
   logBtn: {
     borderWidth: 1.5, borderRadius: 14, paddingVertical: space.md, alignItems: 'center',
   },
-  logBtnText: { fontFamily: font.mono, fontSize: T.h2, fontWeight: '900', letterSpacing: tracking.wide },
+  logBtnText: { fontFamily: font.mono, fontSize: T.h2, fontWeight: '500', letterSpacing: tracking.label },
 
   footer: { paddingHorizontal: space.xxl, paddingVertical: space.md, alignItems: 'center' },
   footerText: { fontFamily: font.mono, fontSize: T.micro, letterSpacing: 2.5, color: color.textDim, textAlign: 'center' },

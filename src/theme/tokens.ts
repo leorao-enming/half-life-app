@@ -1,41 +1,42 @@
 // =============================================================================
-// src/theme/tokens.ts — Single source of truth for the Half-Life design system.
+// src/theme/tokens.ts — Half-Life design system
 //
-// Before this file, every screen redefined its own `C = {...}` palette with
-// drifting hexes (#00B4FF vs #0FF0FC, #00FF87 vs #39FF14, #FFD600 vs #FFFF33).
-// All screens now import from here so the look stays consistent.
-//
-// Accent colors are SEMANTIC — used for meaning, not decoration. A screen
-// should use at most two accents beyond the neutrals.
+// Luxury tier palette: warm near-blacks, muted semantic accents, warm ivory
+// text. Accents are used for MEANING (one glowing focal element), not
+// decoration. Every screen imports from here — no per-file color drift.
 // =============================================================================
 
 import { Platform } from 'react-native';
 
 export const color = {
-  // ── Neutrals ───────────────────────────────────────────────────────────
-  bg:        '#000000',
-  surface:   '#0C0C0C',
-  surfaceHi: '#141414',
-  border:    '#1C1C1C',
-  text:      '#FFFFFF',
-  textMid:   '#6A6A6A',
-  textDim:   '#2E2E2E',
+  // ── Neutrals — warm, not pure digital black/white ─────────────────────
+  bg:        '#070706',   // velvet near-black with a barely-there warm tint
+  surface:   '#0E0D0B',   // deep charcoal
+  surfaceHi: '#151412',   // elevated card surface
+  border:    '#1D1C19',   // barely-there divider
+  text:      '#DEDAD3',   // warm ivory (not harsh white)
+  textMid:   '#4A4742',   // warm grey
+  textDim:   '#252320',   // near-invisible
 
-  // ── Semantic accents ───────────────────────────────────────────────────
-  primary: '#0FF0FC', // caffeine / focus — the hero accent
-  ready:   '#39FF14', // sleep-ready / good state
-  energy:  '#FFB020', // sugar / energy window (softer & more legible than #FFFF33)
-  alert:   '#FF073A', // crash risk / over-limit
-  sodium:  '#4A9EFF', // electrolytes — calm steel-blue, distinct from caffeine cyan
+  // ── Semantic accents — muted, sophisticated ────────────────────────────
+  // Think: instrument luminescence, not neon signage.
+  primary: '#5DC4BC',   // soft aquamarine  — caffeine / focus
+  ready:   '#6AB87A',   // muted sage green — sleep-ready / clear
+  energy:  '#BF9040',   // warm amber gold  — sugar / energy
+  alert:   '#B04848',   // muted burgundy   — crash / over-limit
+  sodium:  '#5888A8',   // soft steel blue  — electrolytes
 } as const;
 
 export const font = {
-  mono: Platform.select({ ios: 'Menlo', android: 'monospace', default: 'monospace' }) as string,
+  mono:    Platform.select({ ios: 'Menlo', android: 'monospace', default: 'monospace' }) as string,
+  // system = '' (omit fontFamily) → SF Pro Display on iOS; Roboto on Android
+  // Used for display numbers — system thin weights look like watch dial indices.
+  display: undefined as undefined,
 } as const;
 
 /** Type scale (px). */
 export const type = {
-  display: 30,
+  display: 52,
   h1:      22,
   h2:      15,
   body:    12,
@@ -54,19 +55,19 @@ export const space = {
   xxxl: 32,
 } as const;
 
-/** letterSpacing presets. Body text uses `tight`; labels use `label`/`wide`. */
+/** letterSpacing presets. Body uses `tight`; labels use `label`. */
 export const tracking = {
-  tight: 0.5,
-  label: 3,
-  wide:  4,
+  tight: 0.2,
+  label: 2,
+  wide:  3.5,
 } as const;
 
 /**
- * Compose a hex color with an alpha suffix (e.g. alpha(color.primary, 0.2)).
- * Accepts 0–1. Returns the hex with an 8-bit alpha channel appended.
+ * Append an 8-bit alpha to a hex color string.
+ * alpha(color.primary, 0.2) → '#5DC4BC33'
  */
 export function alpha(hex: string, a: number): string {
   const clamped = Math.max(0, Math.min(1, a));
-  const byte = Math.round(clamped * 255).toString(16).padStart(2, '0').toUpperCase();
+  const byte    = Math.round(clamped * 255).toString(16).padStart(2, '0').toUpperCase();
   return `${hex}${byte}`;
 }
