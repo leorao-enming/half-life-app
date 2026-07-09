@@ -114,19 +114,36 @@ EXPO_PUBLIC_SUPABASE_ANON_KEY=your-anon-key
 ```sql
 create table bio_logs (
   id          uuid primary key default gen_random_uuid(),
-  user_id     uuid references auth.users not null,
-  substance   text not null,
+  user_id     uuid not null references auth.users(id) on delete cascade,
+  label       text not null default '',
+  substance_type text not null check (substance_type in ('caffeine', 'sugar', 'sodium', 'other')),
   amount_mg   numeric not null,
-  logged_at   timestamptz not null default now(),
+  timestamp   timestamptz not null default now(),
+  note        text,
   created_at  timestamptz not null default now()
 );
 
 alter table bio_logs enable row level security;
 
-create policy "Users can manage their own logs"
-  on bio_logs for all
+create policy "Users can read their own logs"
+  on bio_logs for select
+  using (auth.uid() = user_id);
+
+create policy "Users can insert their own logs"
+  on bio_logs for insert
+  with check (auth.uid() = user_id);
+
+create policy "Users can update their own logs"
+  on bio_logs for update
+  using (auth.uid() = user_id)
+  with check (auth.uid() = user_id);
+
+create policy "Users can delete their own logs"
+  on bio_logs for delete
   using (auth.uid() = user_id);
 ```
+
+Equivalent migration: `supabase/migrations/202607090001_create_bio_logs.sql`.
 
 ### Install and run
 

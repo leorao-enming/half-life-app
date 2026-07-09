@@ -39,14 +39,36 @@ function createSafeClient(): SupabaseClient {
   if (!supabaseUrl || !supabaseAnonKey) {
     // Return a no-op proxy so the app doesn't crash when env vars are absent.
     // All method calls resolve with a "not configured" error rather than throwing.
+    const notConfiguredError = new Error('[supabase] Client not configured');
+    const notConfiguredResult = () => Promise.resolve({ data: null, error: notConfiguredError });
+    const authFallback = {
+      getSession: notConfiguredResult,
+      signInWithPassword: notConfiguredResult,
+      signUp: notConfiguredResult,
+      signOut: notConfiguredResult,
+      onAuthStateChange: () => ({
+        data: {
+          subscription: {
+            unsubscribe: () => {},
+          },
+        },
+        error: null,
+      }),
+    };
+
     return new Proxy({} as SupabaseClient, {
       get: (_target, prop) => {
         if (prop === 'auth') {
-          return new Proxy({}, {
-            get: () => () => Promise.resolve({ data: null, error: new Error('[supabase] Client not configured') }),
+          return new Proxy(authFallback, {
+            get: (authTarget, authProp) => {
+              if (authProp in authTarget) {
+                return authTarget[authProp as keyof typeof authTarget];
+              }
+              return notConfiguredResult;
+            },
           });
         }
-        return () => Promise.resolve({ data: null, error: new Error('[supabase] Client not configured') });
+        return notConfiguredResult;
       },
     });
   }
