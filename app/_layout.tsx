@@ -20,6 +20,7 @@ import Constants from 'expo-constants';
 import { supabase } from '../lib/supabase';
 import { initHealthKit } from '../lib/health';
 import { useBioStore } from '../src/store/useBioStore';
+import { AppEntrance } from '../components/AppEntrance';
 
 SplashScreen.preventAutoHideAsync().catch(() => {});
 
@@ -120,16 +121,18 @@ export default function RootLayout() {
 
   return (
     <SafeAreaProvider>
-      <StatusBar style="light" backgroundColor="#000000" />
-      <Stack
-        screenOptions={{
-          headerShown:  false,
-          animation:    'fade',
-          contentStyle: { backgroundColor: '#000000' },
-        }}
-      >
-        <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
-      </Stack>
+      <AppEntrance>
+        <StatusBar style="light" backgroundColor="#000000" />
+        <Stack
+          screenOptions={{
+            headerShown:  false,
+            animation:    'fade',
+            contentStyle: { backgroundColor: '#000000' },
+          }}
+        >
+          <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
+        </Stack>
+      </AppEntrance>
     </SafeAreaProvider>
   );
 }

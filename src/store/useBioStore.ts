@@ -62,11 +62,18 @@ export interface MetabolismFactors {
   sodium: number;
 }
 
+export interface CaffeinePlanPreferences {
+  wakeTime: string;
+  hasLateDeadline: boolean;
+}
+
 export interface BioProfile {
   userId: string;
   displayName: string;
   weightKg: number | null;
   metabolismFactors: MetabolismFactors;
+  /** Local planning preferences used to calculate the next caffeine curfew. */
+  caffeinePlan: CaffeinePlanPreferences;
   /**
    * HealthKit-derived RHR multiplier [0.70 – 1.00].
    * Feeds into the KineticsEngine to lengthen half-life when RHR is elevated.
@@ -86,6 +93,8 @@ export interface LogEntry {
   amountMg: number;
   timestamp: number;
   note?: string;
+  /** Optional on-device photo selected while recording the drink. */
+  photoUri?: string;
   /** True when this entry is pending Supabase sync */
   pendingSync?: boolean;
 }
@@ -178,6 +187,7 @@ const DEFAULT_PROFILE: BioProfile = {
   displayName: 'User',
   weightKg: null,
   metabolismFactors: { caffeine: 1.0, sugar: 1.0, sodium: 1.0 },
+  caffeinePlan: { wakeTime: '07:30', hasLateDeadline: false },
   healthKitMultiplier: 1.0,
   allergies: [],
   createdAt: Date.now(),
@@ -461,7 +471,7 @@ export function computeActiveCaffeine(
   return logs
     .filter((e) => e.substanceType === 'caffeine')
     .reduce(
-      (total, e) => total + calcDecaySimple(e.amountMg, (nowMs - e.timestamp) / 3_600_000, effectiveHL),
+      (total, e) => total + calcDecaySimple(e.amountMg, Math.max(0, (nowMs - e.timestamp) / 3_600_000), effectiveHL),
       0,
     );
 }
@@ -480,7 +490,7 @@ export function computeActiveBySubstance(
   return logs
     .filter((e) => e.substanceType === substance)
     .reduce(
-      (total, e) => total + calcDecaySimple(e.amountMg, (nowMs - e.timestamp) / 3_600_000, hl),
+      (total, e) => total + calcDecaySimple(e.amountMg, Math.max(0, (nowMs - e.timestamp) / 3_600_000), hl),
       0,
     );
 }

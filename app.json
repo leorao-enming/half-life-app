@@ -1,6 +1,6 @@
 {
   "expo": {
-    "name": "half-life-app",
+    "name": "Half-Life",
     "slug": "half-life-app",
     "scheme": "halflifeapp",
     "version": "1.0.0",
@@ -19,6 +19,7 @@
     "ios": {
       "supportsTablet": true,
       "bundleIdentifier": "com.leorao.halflifeapp",
+      "buildNumber": "1",
       "newArchEnabled": false,
       "infoPlist": {
         "ITSAppUsesNonExemptEncryption": false,
@@ -47,6 +48,13 @@
       "expo-router",
       "expo-dev-client",
       "expo-splash-screen",
+      [
+        "expo-image-picker",
+        {
+          "cameraPermission": "Half-Life uses the camera only when you choose to photograph a drink for your private intake record.",
+          "photosPermission": "Half-Life lets you choose a drink photo from your library for your private intake record."
+        }
+      ],
       [
         "react-native-health",
         {

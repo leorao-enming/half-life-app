@@ -11,29 +11,12 @@
 
 import { createClient, SupabaseClient } from "@supabase/supabase-js";
 import AsyncStorage from "@react-native-async-storage/async-storage";
-import { Alert } from "react-native";
 
 const supabaseUrl = process.env.EXPO_PUBLIC_SUPABASE_URL ?? '';
 const supabaseAnonKey = process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY ?? '';
 
-const missingVars: string[] = [];
-if (!supabaseUrl)      missingVars.push('EXPO_PUBLIC_SUPABASE_URL');
-if (!supabaseAnonKey)  missingVars.push('EXPO_PUBLIC_SUPABASE_ANON_KEY');
-
-if (missingVars.length > 0) {
-  missingVars.forEach((v) => console.error(`[supabase] Missing ${v} — cloud sync will not work.`));
-
-  // Defer Alert until after the RN bridge and root component have mounted.
-  setTimeout(() => {
-    Alert.alert(
-      '⚠  Cloud Sync Disabled',
-      `The following environment variable${missingVars.length > 1 ? 's are' : ' is'} missing:\n\n` +
-      missingVars.map((v) => `  • ${v}`).join('\n') +
-      '\n\nCreate a .env file in the project root and restart the dev server to enable cloud sync.',
-      [{ text: 'OK' }],
-    );
-  }, 1_500);
-}
+// Cloud sync is optional. Missing configuration deliberately falls back to the
+// local-only client below; setup details must never interrupt the user-facing app.
 
 function createSafeClient(): SupabaseClient {
   if (!supabaseUrl || !supabaseAnonKey) {

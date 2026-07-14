@@ -34,7 +34,7 @@ function TabIcon({ name, color, focused }: TabIconProps) {
         elevation:       10,
       },
     ]}>
-      <Ionicons name={name} size={22} color={color} />
+  <Ionicons name={name} size={24} color={color} />
     </View>
   );
 }
@@ -60,8 +60,8 @@ export default function TabsLayout() {
         tabBarInactiveTintColor: color.textDim,
         tabBarLabelStyle: {
           fontFamily:    MONO,
-          fontSize:      8,
-          letterSpacing: 3,
+          fontSize:      11,
+          letterSpacing: 0.6,
           marginBottom:  8,
         },
         tabBarItemStyle: styles.tabItem,
@@ -70,7 +70,7 @@ export default function TabsLayout() {
       <Tabs.Screen
         name="index"
         options={{
-          title: 'NOW',
+          title: 'TONIGHT',
           tabBarActiveTintColor: color.primary,
           tabBarIcon: ({ color: c, focused }) => (
             <TabIcon name="pulse-outline" color={c} focused={focused} />
@@ -80,7 +80,7 @@ export default function TabsLayout() {
       <Tabs.Screen
         name="analytics"
         options={{
-          title: 'TRENDS',
+          title: 'PATTERNS',
           tabBarActiveTintColor: color.energy,
           tabBarIcon: ({ color: c, focused }) => (
             <TabIcon name="bar-chart-outline" color={c} focused={focused} />
@@ -90,18 +90,15 @@ export default function TabsLayout() {
       <Tabs.Screen
         name="lab"
         options={{
-          title: 'LAB',
+          title: 'PLAN',
           tabBarActiveTintColor: color.ready,
           tabBarIcon: ({ color: c, focused }) => (
             <TabIcon name="flask-outline" color={c} focused={focused} />
           ),
         }}
       />
-      {/* Inject is a modal — hidden from tab bar, accessed via FAB */}
-      <Tabs.Screen
-        name="inject"
-        options={{ href: null }}
-      />
+      {/* Capture stays a focused modal flow; Trace is represented on Tonight. */}
+      <Tabs.Screen name="inject" options={{ href: null }} />
     </Tabs>
   );
 }
@@ -112,7 +109,7 @@ const styles = StyleSheet.create({
     borderTopWidth:  0,
     backgroundColor: 'transparent',
     elevation:       0,
-    height:          72,
+    height:          78,
   },
   tabBarBlur: {
     borderTopWidth:  0.5,
@@ -125,6 +122,6 @@ const styles = StyleSheet.create({
     backgroundColor:  'transparent',
   },
   tabItem: {
-    paddingTop: 8,
+    paddingTop: 7,
   },
 });

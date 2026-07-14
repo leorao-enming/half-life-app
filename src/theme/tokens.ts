@@ -15,8 +15,8 @@ export const color = {
   surfaceHi: '#151412',   // elevated card surface
   border:    '#1D1C19',   // barely-there divider
   text:      '#DEDAD3',   // warm ivory (not harsh white)
-  textMid:   '#4A4742',   // warm grey
-  textDim:   '#252320',   // near-invisible
+  textMid:   '#9A958D',   // readable warm grey for supporting information
+  textDim:   '#706B64',   // subdued, but still visible on the dark surface
 
   // ── Semantic accents — muted, sophisticated ────────────────────────────
   // Think: instrument luminescence, not neon signage.
@@ -25,6 +25,7 @@ export const color = {
   energy:  '#BF9040',   // warm amber gold  — sugar / energy
   alert:   '#B04848',   // muted burgundy   — crash / over-limit
   sodium:  '#5888A8',   // soft steel blue  — electrolytes
+  routeTarget: '#9B8BD0', // muted violet — target sleep landing
 } as const;
 
 export const font = {
