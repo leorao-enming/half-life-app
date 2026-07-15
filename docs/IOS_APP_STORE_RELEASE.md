@@ -45,7 +45,8 @@ Then in Xcode choose **Any iOS Device (arm64)**, select **Product → Archive**,
 
 - Create the app record using the final bundle identifier.
 - Set the App Store version to the user-visible version in `app.json`; increase `ios.buildNumber` for every upload.
-- Complete privacy nutrition labels accurately. This app can process health and health-related user data through HealthKit, and may sync user data to Supabase when cloud sync is enabled.
-- Provide a public privacy-policy URL and support URL before submission.
-- Test HealthKit permissions on a physical device; the simulator is not a replacement for production HealthKit validation.
-- Provide review notes explaining why HealthKit data is requested and how it affects the metabolism dashboard.
+- Publish [`PRIVACY_POLICY.md`](PRIVACY_POLICY.md) at a public HTTPS URL, enter it as the App Privacy policy URL, and set a monitored support URL and email.
+- Complete privacy nutrition labels accurately. When cloud sync is enabled, drink entries and notes are stored with the signed-in account; Apple Health data is processed on-device and not uploaded.
+- Test HealthKit permissions on a physical device. The app must not request Apple Health at launch; connect it from the Plan screen and verify the exact read permissions, grant flow, and denial flow.
+- Provide review notes explaining that HealthKit is optional, is used only to personalize caffeine-clearance estimates, and the underlying Apple Health data is not uploaded.
+- Follow [`TESTFLIGHT_BETA_CHECKLIST.md`](TESTFLIGHT_BETA_CHECKLIST.md) before inviting testers.

@@ -5,10 +5,11 @@
 // belong in the product experience.
 // =============================================================================
 
-import React, { useMemo } from 'react';
-import { ScrollView, StyleSheet, Text, View } from 'react-native';
+import React, { useMemo, useState } from 'react';
+import { Platform, ScrollView, StyleSheet, Text, View } from 'react-native';
 import * as Haptics from 'expo-haptics';
 import { Ionicons } from '@expo/vector-icons';
+import { router } from 'expo-router';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { CurfewStamp } from '../../components/CurfewStamp';
 import { GlassPressable } from '../../components/GlassPressable';
@@ -17,6 +18,7 @@ import { buildCurfewPlan } from '../../src/domain/caffeine';
 import { useCaffeineSnapshot } from '../../hooks/useCaffeineSnapshot';
 import { useBioStore } from '../../src/store/useBioStore';
 import { buildDailyCurfewStamp } from '../../src/domain/patterns';
+import { initHealthKit } from '../../lib/health';
 
 const WAKE_TIMES = ['06:30', '07:30', '08:30'];
 const DEFAULT_PLAN = { wakeTime: '07:30', hasLateDeadline: false };
@@ -26,11 +28,30 @@ export default function PlanScreen() {
   const plan = useBioStore((state) => state.profile.caffeinePlan ?? DEFAULT_PLAN);
   const updateBioProfile = useBioStore((state) => state.updateBioProfile);
   const { halfLifeHours, logs, nowMs } = useCaffeineSnapshot();
+  const [healthStatus, setHealthStatus] = useState('Not connected');
 
   const curfew = useMemo(() => {
     return buildCurfewPlan(plan.wakeTime, plan.hasLateDeadline, halfLifeHours);
   }, [halfLifeHours, plan.hasLateDeadline, plan.wakeTime]);
   const todayStamp = useMemo(() => buildDailyCurfewStamp(logs, nowMs), [logs, nowMs]);
+
+  const connectHealth = async () => {
+    if (Platform.OS !== 'ios') {
+      setHealthStatus('Apple Health is available on iPhone and iPad only');
+      return;
+    }
+
+    setHealthStatus('Requesting access…');
+    const { status, multiplier } = await initHealthKit();
+    if (!status.authorized) {
+      setHealthStatus(status.error ?? 'Access not granted');
+      return;
+    }
+
+    useBioStore.getState().setHealthKitMultiplier(multiplier);
+    setHealthStatus('Connected — estimate personalized on this device');
+    void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+  };
 
   return (
     <SafeAreaView style={s.root} edges={['top', 'left', 'right']}>
@@ -102,6 +123,18 @@ export default function PlanScreen() {
           <View><Text style={s.cardLabel}>TODAY’S CURFEW STAMP</Text><Text style={s.stampCopy}>{todayStamp.detail.title}{`\n`}{todayStamp.drinkCount ? `${todayStamp.detail.totalMg} mg from ${todayStamp.drinkCount} drink${todayStamp.drinkCount > 1 ? 's' : ''}` : 'No caffeine recorded yet'}</Text></View>
           <CurfewStamp detail={todayStamp.detail} size={82} />
         </View>
+
+        <View style={s.privacyCard}>
+          <Text style={s.cardLabel}>OPTIONAL CONNECTIONS</Text>
+          <Text style={s.privacyCopy}>Apple Health is optional. Half-Life remains usable without it.</Text>
+          <GlassPressable accessibilityRole="button" accessibilityLabel="Connect Apple Health" onPress={connectHealth} style={s.permissionButton}>
+            <Ionicons name="heart-outline" size={18} color={color.primary} />
+            <View style={s.permissionText}><Text style={s.permissionTitle}>APPLE HEALTH</Text><Text style={s.permissionDetail}>{healthStatus}</Text></View>
+          </GlassPressable>
+          <GlassPressable accessibilityRole="link" accessibilityLabel="Read privacy and data use" onPress={() => router.push('/privacy')} style={s.privacyLink}>
+            <Text style={s.privacyLinkText}>Privacy &amp; data use</Text><Ionicons name="chevron-forward" size={16} color={color.textMid} />
+          </GlassPressable>
+        </View>
         <Text style={s.estimate}>Estimated guidance · not medical advice · {curfew.rationale}</Text>
       </ScrollView>
     </SafeAreaView>
@@ -138,5 +171,13 @@ const s = StyleSheet.create({
   emptyCircle: { width: 25, height: 25, borderRadius: 13, borderColor: color.textMid, borderWidth: 1.5 },
   stampCard: { minHeight: 98, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', borderRadius: 16, paddingLeft: space.lg, paddingRight: 10, borderWidth: 1, borderColor: alpha(color.text, .2), backgroundColor: alpha(color.surfaceHi, .38) },
   stampCopy: { color: color.textMid, fontSize: 13, lineHeight: 19, marginTop: 7 },
+  privacyCard: { borderRadius: 16, padding: space.lg, borderWidth: 1, borderColor: alpha(color.text, .2), backgroundColor: alpha(color.surfaceHi, .38), gap: space.sm },
+  privacyCopy: { color: color.textMid, fontSize: 13, lineHeight: 19 },
+  permissionButton: { minHeight: 58, borderRadius: 12, paddingHorizontal: space.md, flexDirection: 'row', alignItems: 'center', gap: space.md },
+  permissionText: { flex: 1 },
+  permissionTitle: { color: color.text, fontFamily: font.mono, fontSize: 11, letterSpacing: .7 },
+  permissionDetail: { color: color.textMid, fontSize: 12, marginTop: 3 },
+  privacyLink: { minHeight: 40, paddingHorizontal: space.xs, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
+  privacyLinkText: { color: color.textMid, fontSize: 13, textDecorationLine: 'underline' },
   estimate: { color: color.textDim, fontSize: 12, lineHeight: 18, marginBottom: space.md },
 });

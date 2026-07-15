@@ -3,39 +3,24 @@
 // Boot sequence:
 //   1. Rehydrate Zustand store from AsyncStorage
 //   2. Supabase auth listener → setSupabaseUser → triggers cloud sync
-//   3. HealthKit auto-init on iOS → setHealthKitMultiplier
-//   4. Notification permissions (deferred 2 s to avoid startup jank)
-//   5. Offline-queue flush: periodic (30 s) + AppState foreground
+//   3. Offline-queue flush: periodic (30 s) + AppState foreground
+//
+// HealthKit permission is requested only from the user's explicit choice in
+// the Plan tab. Never prompt at app launch.
 // =============================================================================
 
 import { useEffect, useRef } from 'react';
-import { AppState, AppStateStatus, Platform } from 'react-native';
+import { AppState, AppStateStatus } from 'react-native';
 import { Stack } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import * as SplashScreen from 'expo-splash-screen';
-import * as Notifications from 'expo-notifications';
 import * as Network from 'expo-network';
-import Constants from 'expo-constants';
 import { supabase } from '../lib/supabase';
-import { initHealthKit } from '../lib/health';
 import { useBioStore } from '../src/store/useBioStore';
 import { AppEntrance } from '../components/AppEntrance';
 
 SplashScreen.preventAutoHideAsync().catch(() => {});
-
-Notifications.setNotificationHandler({
-  handleNotification: async () => ({
-    shouldShowAlert:  true,
-    shouldPlaySound:  true,
-    shouldSetBadge:   false,
-    shouldShowBanner: true,
-    shouldShowList:   true,
-  }),
-});
-
-console.log('[layout] hostUri:', Constants.expoConfig?.hostUri ?? '⚠ undefined');
-console.log('[layout] scheme :', Constants.expoConfig?.scheme  ?? '⚠ undefined');
 
 export default function RootLayout() {
   const hasInitRef  = useRef(false);
@@ -61,34 +46,7 @@ export default function RootLayout() {
       })
       .catch(() => {});
 
-    // ── 3. HealthKit auto-init (iOS only, non-blocking) ────────────────────
-    if (Platform.OS === 'ios') {
-      initHealthKit()
-        .then(({ multiplier }) => {
-          useBioStore.getState().setHealthKitMultiplier(multiplier);
-          console.log('[layout] HealthKit multiplier:', multiplier.toFixed(3));
-        })
-        .catch(() => {});
-    }
-
-    // ── 4. Notification permissions (deferred to avoid startup jank) ───────
-    const notifTimer = setTimeout(async () => {
-      try {
-        if (Platform.OS === 'android') {
-          await Notifications.setNotificationChannelAsync('biohazard', {
-            name:             'Half-Life Alerts',
-            importance:       Notifications.AndroidImportance.HIGH,
-            vibrationPattern: [0, 250, 100, 250],
-            lightColor:       '#FF073A',
-            sound:            'default',
-          });
-        }
-        const { status } = await Notifications.getPermissionsAsync();
-        if (status !== 'granted') await Notifications.requestPermissionsAsync();
-      } catch {}
-    }, 2_000);
-
-    // ── 5. Offline queue flush ─────────────────────────────────────────────
+    // ── 3. Offline queue flush ─────────────────────────────────────────────
     const flushInterval = setInterval(async () => {
       try {
         if (useBioStore.getState().offlineQueue.length === 0) return;
@@ -113,7 +71,6 @@ export default function RootLayout() {
 
     return () => {
       subscription.unsubscribe();
-      clearTimeout(notifTimer);
       clearInterval(flushInterval);
       appStateSub.remove();
     };

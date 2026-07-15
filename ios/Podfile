@@ -76,16 +76,20 @@ target 'HalfLife' do
       end
     end
 
-    # Expo Constants generates `bash -l -c <script path>`. A project path
-    # containing spaces is reparsed by the nested shell and breaks that path.
-    # Invoke the script directly so the expanded path remains one argument.
+    # Embed the public Expo app config in EXConstants.bundle for release builds.
+    # Explicit PROJECT_ROOT avoids path resolution failures when the project
+    # directory contains spaces (for example, "Half-Life App").
     installer.pods_project.targets.each do |target|
       next unless target.name == 'EXConstants'
 
       target.shell_script_build_phases.each do |phase|
         next unless phase.name == '[CP-User] Generate app.config for prebuilt Constants.manifest'
 
-        phase.shell_script = 'bash -l "$PODS_TARGET_SRCROOT/../scripts/get-app-config-ios.sh"'
+        # Expo's script currently uses an unquoted `$PROJECT_DIR`; a parent
+        # folder named "Half-Life App" makes its Pods check exit early.
+        # The script only needs this value to identify the Pods integration,
+        # while PROJECT_ROOT below remains the actual app directory.
+        phase.shell_script = 'PROJECT_DIR=Pods PROJECT_ROOT="$PODS_ROOT/../.." bash "$PODS_TARGET_SRCROOT/../scripts/get-app-config-ios.sh"'
       end
     end
   end

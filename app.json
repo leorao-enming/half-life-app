@@ -3,7 +3,7 @@
     "name": "Half-Life",
     "slug": "half-life-app",
     "scheme": "halflifeapp",
-    "version": "1.0.0",
+    "version": "1.0.1",
     "assetBundlePatterns": [
       "assets/**"
     ],
@@ -19,12 +19,11 @@
     "ios": {
       "supportsTablet": true,
       "bundleIdentifier": "com.leorao.halflifeapp",
-      "buildNumber": "1",
+      "buildNumber": "3",
       "newArchEnabled": false,
       "infoPlist": {
         "ITSAppUsesNonExemptEncryption": false,
-        "NSHealthShareUsageDescription": "Half-Life needs to read your steps and activity for your bio-hacking dashboard.",
-        "NSHealthUpdateUsageDescription": "Half-Life needs to log your caffeine and sugar intake to Apple Health."
+        "NSHealthShareUsageDescription": "Half-Life reads heart-rate and sleep data only after you choose to connect Apple Health, to personalize caffeine-clearance estimates. Your Apple Health data is not uploaded by this app."
       },
       "entitlements": {
         "com.apple.developer.healthkit": true,
@@ -58,8 +57,8 @@
       [
         "react-native-health",
         {
-          "healthSharePermission": "Half-Life needs to read your health data to track your fitness.",
-          "healthUpdatePermission": "Half-Life needs to sync your health data."
+          "healthSharePermission": "Half-Life reads heart-rate and sleep data only after you choose to connect Apple Health, to personalize caffeine-clearance estimates. Your Apple Health data is not uploaded by this app.",
+          "healthUpdatePermission": "Half-Life does not write health data to Apple Health."
         }
       ],
       "expo-font",

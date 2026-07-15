@@ -2,8 +2,8 @@
 // lib/health.ts
 // HealthKit Integration — Phase 5 (The Moat)
 //
-// iOS-only module that requests HealthKit permissions, fetches the user's
-// Resting Heart Rate (RHR) for the past 7 days, and derives a
+// iOS-only module that requests HealthKit permissions after the user chooses
+// to connect Apple Health, fetches the user's Resting Heart Rate (RHR) for the past 7 days, and derives a
 // `metabolicMultiplier` that the KineticsEngine uses to personalise
 // caffeine half-life calculations.
 //
@@ -36,11 +36,6 @@ if (Platform.OS === 'ios') {
   }
 }
 
-// Diagnostic logs — fired once at module load time so Metro console captures them
-// even before the user taps the HealthKit button.
-console.log('[HealthKit] module keys:', Object.keys(AppleHealthKit || {}));
-console.log('[HealthKit] initHealthKit type:', typeof AppleHealthKit?.initHealthKit);
-
 // ---------------------------------------------------------------------------
 // Permission manifest
 // ---------------------------------------------------------------------------
@@ -52,8 +47,6 @@ const HEALTH_PERMISSIONS = {
       'RestingHeartRate',
       'SleepAnalysis',
     ],
-    // Dietarysugar lets us write glucose/sugar intake to Apple Health
-    write: ['DietarySugar'] as string[],
   },
 };
 
@@ -193,128 +186,6 @@ export function calculateMetabolicMultiplier(samples: RHRSample[]): number {
 }
 
 // ---------------------------------------------------------------------------
-// Write sugar intake to Apple Health
-// ---------------------------------------------------------------------------
-
-export interface SaveSugarResult {
-  saved: boolean;
-  error?: string;
-}
-
-/**
- * Writes a sugar intake amount to Apple Health as Dietary Sugar.
- * Safe no-op on Android or when HealthKit is unavailable.
- *
- * @param amountGrams - Sugar amount in grams
- * @param timestamp   - Optional Unix ms timestamp (defaults to now)
- */
-export async function saveHealthKitSugar(
-  amountGrams: number,
-  timestamp?: number,
-): Promise<SaveSugarResult> {
-  if (Platform.OS !== 'ios' || !AppleHealthKit) {
-    return { saved: false, error: 'HealthKit not available on this platform' };
-  }
-
-  return new Promise((resolve) => {
-    try {
-      const options = {
-        value: amountGrams,
-        unit: 'gram',
-        startDate: new Date(timestamp ?? Date.now()).toISOString(),
-        endDate:   new Date(timestamp ?? Date.now()).toISOString(),
-      };
-
-      // DietarySugar is the correct HealthKit identifier for dietary sugar
-      if (typeof AppleHealthKit.saveDietarySugar === 'function') {
-        AppleHealthKit.saveDietarySugar(options, (err: string | null) => {
-          if (err) {
-            console.warn('[health] saveDietarySugar failed:', err);
-            resolve({ saved: false, error: err });
-          } else {
-            resolve({ saved: true });
-          }
-        });
-      } else {
-        // Fallback: saveFood if available (older react-native-health versions)
-        if (typeof AppleHealthKit.saveFood === 'function') {
-          AppleHealthKit.saveFood(
-            { ...options, foodName: 'Sugar', nutrients: { Sugar: amountGrams } },
-            (err: string | null) => {
-              if (err) {
-                console.warn('[health] saveFood fallback failed:', err);
-                resolve({ saved: false, error: err });
-              } else {
-                resolve({ saved: true });
-              }
-            },
-          );
-        } else {
-          resolve({ saved: false, error: 'saveDietarySugar not available in this build' });
-        }
-      }
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
-      console.warn('[health] saveHealthKitSugar threw:', msg);
-      resolve({ saved: false, error: msg });
-    }
-  });
-}
-
-// ---------------------------------------------------------------------------
-// Minimal diagnostic test — StepCount only, raw callback output
-// ---------------------------------------------------------------------------
-
-export interface HealthKitMinimalResult {
-  /** null on success, raw error string on failure */
-  callbackError: string | null;
-  /** True if initHealthKit callback fired without error */
-  success: boolean;
-  /** Human-readable explanation of why the module is null, if applicable */
-  moduleNullReason?: string;
-}
-
-/**
- * Minimal HealthKit smoke-test used during native-layer debugging.
- *
- * Requests only read access for StepCount — the smallest possible permission
- * set — and returns the *exact* raw callback result without any message
- * substitution. Use this to verify that the native module is linked and the
- * entitlements/provisioning are correct before expanding permissions.
- *
- * Does NOT read any step data; does NOT write anything to Health.
- */
-export async function testHealthKitMinimal(): Promise<HealthKitMinimalResult> {
-  if (Platform.OS !== 'ios') {
-    return { callbackError: 'Not running on iOS', success: false, moduleNullReason: 'Platform is not iOS' };
-  }
-
-  if (!AppleHealthKit) {
-    const reason = 'AppleHealthKit is null — native module failed to link. '
-      + 'This usually means the app is running in Expo Go or the EAS build did not include react-native-health.';
-    console.log('[HealthKit] testHealthKitMinimal → module is null:', reason);
-    return { callbackError: reason, success: false, moduleNullReason: reason };
-  }
-
-  console.log('[HealthKit] testHealthKitMinimal → calling initHealthKit with StepCount only…');
-
-  return new Promise((resolve) => {
-    const minimalPermissions = {
-      permissions: {
-        read:  ['StepCount'],
-        write: [] as string[],
-      },
-    };
-
-    AppleHealthKit!.initHealthKit(minimalPermissions, (err: string | null) => {
-      // Log the exact raw value — do NOT reword or replace this
-      console.log('[HealthKit] initHealthKit raw callback → err:', err);
-      resolve({ callbackError: err, success: err === null });
-    });
-  });
-}
-
-// ---------------------------------------------------------------------------
 // Convenience: one-shot init + fetch + multiplier
 // ---------------------------------------------------------------------------
 
@@ -324,7 +195,7 @@ export async function testHealthKitMinimal(): Promise<HealthKitMinimalResult> {
  *   2. Fetches the last 7 days of RHR
  *   3. Returns the metabolic multiplier and raw samples
  *
- * Designed to be called once at app startup from the root layout.
+ * Designed to be called after the user chooses to connect Apple Health.
  */
 export async function initHealthKit(): Promise<{
   multiplier: number;
